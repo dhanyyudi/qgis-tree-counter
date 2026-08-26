@@ -42,6 +42,7 @@ PACKAGE_MANIFEST = (
     "runtime/__init__.py",
     "runtime/catalog.json",
     "runtime/catalog.py",
+    "runtime/installer.py",
     "runtime/manifest.py",
     "runtime/paths.py",
     "runtime/python_probe.py",

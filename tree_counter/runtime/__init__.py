@@ -3,6 +3,13 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 from .catalog import Catalog, CatalogError, load_catalog, platform_key
+from .installer import (
+    InstallCancelled,
+    InstallError,
+    InstallPlan,
+    RuntimeInstaller,
+    RuntimeStatus,
+)
 from .manifest import (
     ManifestError,
     RuntimeManifest,
@@ -27,13 +34,18 @@ from .python_probe import (
 __all__ = [
     "Catalog",
     "CatalogError",
+    "InstallCancelled",
+    "InstallError",
+    "InstallPlan",
     "ManifestError",
     "PythonProbe",
     "RuntimeLocationError",
+    "RuntimeInstaller",
     "RuntimeManifest",
     "RuntimePaths",
     "RuntimeReport",
     "RuntimeState",
+    "RuntimeStatus",
     "assert_safe_runtime_root",
     "default_runtime_root",
     "discover_candidates",
