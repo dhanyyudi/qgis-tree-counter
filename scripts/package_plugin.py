@@ -30,13 +30,13 @@ def _package_files(package: Path) -> list[Path]:
     for path in package.rglob("*"):
         if path.is_symlink():
             raise ValueError(f"symlinks are not allowed: {path}")
-        if not path.is_file():
-            continue
         relative = path.relative_to(package)
         if (
             "__pycache__" in {part.casefold() for part in relative.parts}
             or path.suffix.casefold() in {".pyc", ".pyo"}
         ):
+            raise ValueError(f"forbidden cache or bytecode file: {path}")
+        if not path.is_file():
             continue
         if relative.as_posix() not in PACKAGE_MANIFEST:
             raise ValueError(

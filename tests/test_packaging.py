@@ -130,6 +130,73 @@ def test_build_package_rejects_any_file_outside_foundation_manifest(
         build_package(repo, tmp_path / "bad-manifest.zip")
 
 
+def test_build_package_rejects_maintainer_path_in_package_text(
+    tmp_path: Path,
+) -> None:
+    from scripts.package_plugin import build_package
+
+    repo = tmp_path / "repo"
+    shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(".git"))
+    package = repo / "tree_counter" / "constants.py"
+    package.write_text(
+        package.read_text(encoding="utf-8")
+        + "\nprivate path: /" + "Users/maintainer/private\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="maintainer|internal|forbidden"):
+        build_package(repo, tmp_path / "bad-content.zip")
+
+
+@pytest.mark.parametrize(
+    "relative_path", ["core/__pycache__/cached.pyc", "stale.pyo"]
+)
+def test_source_and_builder_reject_package_cache_files(
+    tmp_path: Path, relative_path: str
+) -> None:
+    from scripts.check_publication import validate_source
+    from scripts.package_plugin import build_package
+
+    repo = tmp_path / "repo"
+    shutil.copytree(
+        ROOT,
+        repo,
+        ignore=shutil.ignore_patterns(
+            ".git", "__pycache__", "*.pyc", "*.pyo"
+        ),
+    )
+    candidate = repo / "tree_counter" / relative_path
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_bytes(b"cache")
+
+    errors = validate_source(repo)
+    assert any("cache" in error.lower() for error in errors)
+    with pytest.raises(ValueError, match="cache|forbidden|invalid"):
+        build_package(repo, tmp_path / "cache-rejected.zip")
+
+
+def test_source_and_builder_reject_empty_cache_directory(
+    tmp_path: Path,
+) -> None:
+    from scripts.check_publication import validate_source
+    from scripts.package_plugin import build_package
+
+    repo = tmp_path / "repo"
+    shutil.copytree(
+        ROOT,
+        repo,
+        ignore=shutil.ignore_patterns(
+            ".git", "__pycache__", "*.pyc", "*.pyo"
+        ),
+    )
+    (repo / "tree_counter" / "core" / "__pycache__").mkdir()
+
+    errors = validate_source(repo)
+    assert any("cache" in error.lower() for error in errors)
+    with pytest.raises(ValueError, match="cache|forbidden|invalid"):
+        build_package(repo, tmp_path / "empty-cache-rejected.zip")
+
+
 def test_build_package_rejects_source_archive_over_20_mib(
     tmp_path: Path,
 ) -> None:
@@ -148,9 +215,10 @@ def test_build_package_rejects_source_archive_over_20_mib(
 
 
 @pytest.mark.parametrize("relative_path", [".pyc", ".pyo"])
-def test_build_package_excludes_python_cache_and_bytecode(
+def test_build_package_rejects_python_cache_and_bytecode(
     tmp_path: Path, relative_path: str
 ) -> None:
+    from scripts.check_publication import validate_source
     from scripts.package_plugin import build_package
 
     repo = tmp_path / "repo"
@@ -159,12 +227,10 @@ def test_build_package_excludes_python_cache_and_bytecode(
     cache.mkdir(exist_ok=True)
     (cache / f"cached{relative_path}").write_bytes(b"cache")
 
-    archive = build_package(repo, tmp_path / "cache.zip")
-    with zipfile.ZipFile(archive) as handle:
-        assert all(
-            "__pycache__" not in name and not name.endswith(relative_path)
-            for name in handle.namelist()
-        )
+    errors = validate_source(repo)
+    assert any("cache" in error.lower() for error in errors)
+    with pytest.raises(ValueError, match="cache|forbidden|invalid"):
+        build_package(repo, tmp_path / "cache.zip")
 
 
 @pytest.mark.parametrize("kind", ["root", "directory", "file", "broken"])
