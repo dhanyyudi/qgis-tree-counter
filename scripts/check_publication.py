@@ -61,6 +61,7 @@ PACKAGE_MANIFEST = (
     "worker/__main__.py",
     "worker/backend_base.py",
     "worker/backend_onnx.py",
+    "worker/backend_ultralytics.py",
     "worker/capabilities.py",
     "worker/image.py",
     "worker/model_info.py",

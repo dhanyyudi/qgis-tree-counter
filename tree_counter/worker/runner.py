@@ -44,7 +44,94 @@ BACKEND_ENVIRONMENT_VARIABLE = "TREE_COUNTER_WORKER_BACKEND"
 # tests and its module is never part of the plugin package.
 FAKE_BACKEND_NAME = "fake"
 FAKE_BACKEND_MODULE = "tree_counter_fake_backend"
-SUPPORTED_BACKEND_NAMES = ("auto", FAKE_BACKEND_NAME)
+ONNX_BACKEND_NAME = "onnx"
+ULTRALYTICS_BACKEND_NAME = "ultralytics"
+SUPPORTED_BACKEND_NAMES = (
+    "auto",
+    ONNX_BACKEND_NAME,
+    ULTRALYTICS_BACKEND_NAME,
+    FAKE_BACKEND_NAME,
+)
+SUFFIX_BACKENDS = {
+    ".onnx": ONNX_BACKEND_NAME,
+    ".pt": ULTRALYTICS_BACKEND_NAME,
+}
+
+
+def _build_backend(name: str) -> Any:
+    if name == ONNX_BACKEND_NAME:
+        from tree_counter.worker.backend_onnx import create_backend
+
+        return create_backend()
+    if name == ULTRALYTICS_BACKEND_NAME:
+        from tree_counter.worker.backend_ultralytics import create_backend
+
+        return create_backend()
+    raise BackendUnavailableError(f"unsupported backend name: {name!r}")
+
+
+class SelectingBackend:
+    """Chooses the real backend from the model's format on first use.
+
+    The worker is started before the model is known, so the concrete
+    backend is resolved from the file suffix at the first call and reused
+    for the rest of the session.
+    """
+
+    name = "auto"
+
+    def __init__(self) -> None:
+        self._backend: Any = None
+
+    def _for(self, model_path: str) -> Any:
+        suffix = Path(model_path).suffix.casefold()
+        if suffix not in SUFFIX_BACKENDS:
+            raise BackendUnavailableError(
+                f"no backend handles {suffix!r} models"
+            )
+        chosen = SUFFIX_BACKENDS[suffix]
+        if self._backend is None:
+            self._backend = _build_backend(chosen)
+            self.name = getattr(self._backend, "name", chosen)
+        return self._backend
+
+    def capabilities(self) -> tuple[str, ...]:
+        """Return accelerators once a backend has been chosen."""
+
+        if self._backend is None:
+            return ()
+        return tuple(self._backend.capabilities())
+
+    def inspect(self, model_path: str, model_sha256: str) -> Any:
+        """Describe a model using the backend its format requires."""
+
+        return self._for(model_path).inspect(model_path, model_sha256)
+
+    def start_run(
+        self, model_path: str, model_sha256: str, settings: Any
+    ) -> Mapping[str, Any]:
+        """Load a model using the backend its format requires."""
+
+        return self._for(model_path).start_run(
+            model_path, model_sha256, settings
+        )
+
+    def infer_tile(
+        self, tile_path: str, tile: Mapping[str, Any]
+    ) -> list[Any]:
+        """Delegate tile inference to the chosen backend."""
+
+        if self._backend is None:
+            raise BackendUnavailableError("no model has been loaded")
+        return self._backend.infer_tile(tile_path, tile)
+
+    def close(self) -> None:
+        """Close the chosen backend, if one was ever built."""
+
+        backend = self._backend
+        self._backend = None
+        if backend is not None:
+            backend.close()
 
 
 class BackendUnavailableError(TreeCounterError):
@@ -59,19 +146,19 @@ def resolve_backend_factory(
 ) -> BackendFactory:
     """Return a factory for the backend named by the environment.
 
-    Only hard-coded names are accepted. ``auto`` has no real backend until
-    the ONNX Runtime and Ultralytics backends land, so it fails closed with
-    a missing-runtime error rather than guessing.
+    Only hard-coded names are accepted, so the environment can never name
+    an arbitrary import target. ``auto`` defers the choice until the model
+    is known and then picks by file format.
     """
 
     env = os.environ if environment is None else environment
     name = env.get(BACKEND_ENVIRONMENT_VARIABLE, "auto").strip().casefold()
     if name not in SUPPORTED_BACKEND_NAMES:
         raise BackendUnavailableError(f"unsupported backend name: {name!r}")
+    if name == "auto":
+        return SelectingBackend
     if name != FAKE_BACKEND_NAME:
-        raise BackendUnavailableError(
-            "no inference backend is installed in this runtime"
-        )
+        return lambda: _build_backend(name)
 
     def _factory() -> Any:
         try:
@@ -504,6 +591,7 @@ class WorkerRunner:
 __all__ = [
     "BACKEND_ENVIRONMENT_VARIABLE",
     "BackendUnavailableError",
+    "SelectingBackend",
     "SUPPORTED_BACKEND_NAMES",
     "WorkerRunner",
     "resolve_backend_factory",
