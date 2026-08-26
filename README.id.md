@@ -17,3 +17,13 @@ Targetnya adalah satu paket untuk QGIS 3.44 LTR hingga QGIS 4.x (maksimal 4.99) 
 ## Status pengembangan
 
 Lihat [CONTRIBUTING.md](CONTRIBUTING.md) untuk ekspektasi pengembangan dan [CHANGELOG.md](CHANGELOG.md) untuk riwayat rilis. Proyek ini dilisensikan berdasarkan GNU Affero General Public License, hanya versi 3 (AGPL-3.0-only).
+
+## Perintah validasi lokal
+
+Jalankan rangkaian pengujian, pemeriksaan publikasi, dan pembuat paket plugin deterministik secara lokal:
+
+```bash
+python3 -m pytest -q
+python3 scripts/check_publication.py
+python3 scripts/package_plugin.py
+```

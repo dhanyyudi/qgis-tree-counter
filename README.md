@@ -17,3 +17,13 @@ The target is one package for QGIS 3.44 LTR through QGIS 4.x (up to 4.99) on Win
 ## Development status
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development expectations and [CHANGELOG.md](CHANGELOG.md) for release history. The project is licensed under the GNU Affero General Public License, version 3 only (AGPL-3.0-only).
+
+## Local validation commands
+
+Run the test suite, publication checks, and deterministic plugin packager locally:
+
+```bash
+python3 -m pytest -q
+python3 scripts/check_publication.py
+python3 scripts/package_plugin.py
+```
