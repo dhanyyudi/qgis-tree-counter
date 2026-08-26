@@ -495,7 +495,7 @@ def test_encoded_worker_error_never_carries_the_diagnostic_detail() -> None:
         "request_id": "req-5",
         "code": "invalid_model",
         "message": "The selected model is not supported.",
-        "traceback": "File /Users/someone/private/path.py",
+        "traceback": "private diagnostic detail",
     }
     with pytest.raises(ProtocolError):
         validate_worker_message(message)
