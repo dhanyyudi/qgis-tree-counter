@@ -11,14 +11,14 @@ from pathlib import Path
 
 try:
     from scripts.check_publication import (
-        MANDATORY_FILES,
+        PACKAGE_MANIFEST,
         PACKAGE_NAME,
         validate_archive,
         validate_source,
     )
 except ModuleNotFoundError:  # Direct ``python3 scripts/package_plugin.py``.
     from check_publication import (  # type: ignore[no-redef]
-        MANDATORY_FILES,
+        PACKAGE_MANIFEST,
         PACKAGE_NAME,
         validate_archive,
         validate_source,
@@ -34,10 +34,15 @@ def _package_files(package: Path) -> list[Path]:
             continue
         relative = path.relative_to(package)
         if (
-            "__pycache__" in relative.parts
-            or path.suffix in {".pyc", ".pyo"}
+            "__pycache__" in {part.casefold() for part in relative.parts}
+            or path.suffix.casefold() in {".pyc", ".pyo"}
         ):
             continue
+        if relative.as_posix() not in PACKAGE_MANIFEST:
+            raise ValueError(
+                "package file is not allowed by the foundation manifest: "
+                f"{path}"
+            )
         files.append(path)
     return sorted(files, key=lambda path: path.relative_to(package).as_posix())
 
@@ -60,7 +65,7 @@ def build_package(repo_root: Path, output_path: Path) -> Path:
     ]
     missing = [
         f"{PACKAGE_NAME}/{name}"
-        for name in MANDATORY_FILES
+        for name in PACKAGE_MANIFEST
         if f"{PACKAGE_NAME}/{name}" not in names
     ]
     if missing:

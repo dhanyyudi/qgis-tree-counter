@@ -16,7 +16,7 @@ The target is one package for QGIS 3.44 LTR through QGIS 4.x (up to 4.99) on Win
 
 ## Development status
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development expectations and [CHANGELOG.md](CHANGELOG.md) for release history. The project is licensed under the GNU Affero General Public License, version 3 only (AGPL-3.0-only).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development expectations, [CHANGELOG.md](CHANGELOG.md) for release history, and [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for the blocking pre-release gates. The project is licensed under the GNU Affero General Public License, version 3 only (AGPL-3.0-only).
 
 ## Local validation commands
 

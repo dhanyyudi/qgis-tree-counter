@@ -56,9 +56,32 @@ jobs:
       - name: Validate packaged archive
         run: python scripts/check_publication.py "dist/tree_counter-${{ steps.version.outputs.version }}.zip"
 
+  qgis4-checker:
+    name: PyQGIS 4 compatibility checker
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/qgis/pyqgis4-checker:main-ubuntu
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Preview PyQt5 to PyQt6 compatibility changes
+        run: pyqt5_to_pyqt6.py --dry_run --logfile pyqgis4-checker.log tree_counter/
+
+      - name: Run blocking PyQt5 to PyQt6 compatibility check
+        run: pyqt5_to_pyqt6.py tree_counter/
+
+      - name: Upload checker log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyqgis4-checker-log
+          path: pyqgis4-checker.log
+          if-no-files-found: ignore
+
   release:
     name: Create GitHub Release
-    needs: quality
+    needs: [quality, qgis4-checker]
     runs-on: ubuntu-latest
     permissions:
       contents: write

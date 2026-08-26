@@ -63,6 +63,13 @@ def test_quality_workflow_has_blocking_triggers_permissions_gates_and_artifact(
     )
     assert archive_pattern in workflow
     _required_blocking_scanners(workflow)
+    assert "ghcr.io/qgis/pyqgis4-checker:main-ubuntu" in workflow
+    assert (
+        "pyqt5_to_pyqt6.py --dry_run --logfile pyqgis4-checker.log "
+        "tree_counter/"
+    ) in workflow
+    assert "pyqt5_to_pyqt6.py tree_counter/" in workflow
+    assert "continue-on-error" not in workflow
 
 
 def test_release_workflow_is_tagged_minimal_and_repeats_quality_gates(
@@ -73,16 +80,46 @@ def test_release_workflow_is_tagged_minimal_and_repeats_quality_gates(
     assert re.search(r"(?m)^\s+-\s+['\"]?v\*['\"]?\s*$", workflow)
     assert re.search(r"(?m)^\s*permissions:\s*$", workflow)
     assert re.search(r"(?m)^\s+contents:\s*write\s*$", workflow)
-    assert re.search(r"(?m)^\s*needs:\s*quality\s*$", workflow)
+    assert re.search(
+        r"(?m)^\s*needs:\s*\[quality,\s*qgis4-checker\]\s*$", workflow
+    )
     assert "actions/create-release" not in workflow
     assert "gh release create" in workflow
     assert "tree_counter-${{ steps.version.outputs.version }}.zip" in workflow
     _required_commands(workflow)
-    assert "actions/upload-artifact" not in workflow
+    assert "name: tree-counter-plugin" not in workflow
     assert "plugins.qgis.org" not in workflow.lower()
     assert "OSGEO" not in workflow.upper()
     assert "qgis_password" not in workflow.lower()
     _required_blocking_scanners(workflow)
+    assert "ghcr.io/qgis/pyqgis4-checker:main-ubuntu" in workflow
+    assert (
+        "pyqt5_to_pyqt6.py --dry_run --logfile pyqgis4-checker.log "
+        "tree_counter/"
+    ) in workflow
+    assert "pyqt5_to_pyqt6.py tree_counter/" in workflow
+    assert "continue-on-error" not in workflow
+
+
+def test_release_checklist_documents_manual_matrix_and_blocking_gates(
+) -> None:
+    checklist = ROOT / "RELEASE_CHECKLIST.md"
+    assert checklist.is_file()
+    text = checklist.read_text(encoding="utf-8")
+    for marker in (
+        "Windows QGIS 3.44",
+        "macOS Apple Silicon QGIS 3.44.13",
+        "macOS Apple Silicon QGIS 4.2.1",
+        "must not be created",
+        "plugins.qgis.org",
+    ):
+        assert marker in text
+    assert "RELEASE_CHECKLIST.md" in (ROOT / "README.md").read_text(
+        encoding="utf-8"
+    )
+    assert "RELEASE_CHECKLIST.md" in (ROOT / "README.id.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_only_release_workflow_can_request_contents_write() -> None:

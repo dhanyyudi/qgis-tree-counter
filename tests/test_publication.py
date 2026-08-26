@@ -33,11 +33,21 @@ def test_valid_source_and_archive_have_no_publication_errors(
     ("field", "value", "expected"),
     [
         ("homepage", "not-a-url", "homepage"),
+        ("repository", "https://example.com/tree-counter", "repository"),
+        ("tracker", "https://example.com/tree-counter/issues", "tracker"),
         ("version", "1.0", "version"),
         ("qgisMinimumVersion", "4.0", "minimum"),
         ("qgisMaximumVersion", "3.44", "maximum"),
         ("license", "MIT", "license"),
         ("about", "No dependency information.", "depend"),
+        ("name", "Other", "name"),
+        ("author", "Other", "author"),
+        ("email", "other@example.com", "email"),
+        ("category", "Vector", "category"),
+        ("experimental", "False", "experimental"),
+        ("deprecated", "True", "deprecated"),
+        ("hasProcessingProvider", "yes", "processing"),
+        ("server", "True", "server"),
     ],
 )
 def test_validate_source_reports_invalid_metadata(
@@ -76,6 +86,31 @@ def test_validate_source_returns_complete_errors_for_multiple_violations(
     assert len(errors) >= 2
     assert any("metadata" in error.lower() for error in errors)
     assert any(".pt" in error.lower() for error in errors)
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "AGENTS" + ".md",
+        "agents" + ".MD",
+        "nested/model.safetensors",
+        "raster.png",
+        "archive.zip",
+    ],
+)
+def test_validate_source_rejects_any_file_outside_foundation_manifest(
+    tmp_path: Path, relative_path: str
+) -> None:
+    from scripts.check_publication import validate_source
+
+    repo = tmp_path / "repo"
+    shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(".git"))
+    candidate = repo / "tree_counter" / relative_path
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_bytes(b"unexpected")
+
+    errors = validate_source(repo)
+    assert any("manifest" in error.lower() for error in errors)
 
 
 def test_validate_archive_rejects_bad_root_and_source_mismatch(
@@ -122,6 +157,43 @@ def test_validate_archive_rejects_forbidden_members(
 
     errors = validate_archive(archive)
     assert any("forbidden" in error.lower() for error in errors)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "tree_counter/" + "AGENTS" + ".md",
+        "tree_counter/" + "agents" + ".MD",
+        "tree_counter/nested/model.safetensors",
+        "tree_counter/raster.png",
+        "tree_counter/archive.zip",
+        "tree_counter/native.dylib",
+    ],
+)
+def test_validate_archive_rejects_members_outside_foundation_manifest(
+    tmp_path: Path, name: str
+) -> None:
+    from scripts.check_publication import validate_archive
+
+    archive = tmp_path / "bad-manifest.zip"
+    with zipfile.ZipFile(archive, "w") as handle:
+        for member in (
+            "tree_counter/__init__.py",
+            "tree_counter/LICENSE",
+            "tree_counter/metadata.txt",
+            "tree_counter/plugin.py",
+        ):
+            handle.writestr(member, b"[general]\n")
+        handle.writestr(name, b"unexpected")
+
+    errors = validate_archive(archive)
+    assert any(
+        any(
+            token in error.lower()
+            for token in ("manifest", "allowed", "unexpected")
+        )
+        for error in errors
+    )
 
 
 def _valid_archive(tmp_path: Path) -> Path:

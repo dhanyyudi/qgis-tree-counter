@@ -6,7 +6,11 @@ from __future__ import annotations
 
 import ast
 import configparser
+import os
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,8 +45,9 @@ def test_metadata_uses_the_public_plugin_identity() -> None:
     )
     assert values["about"] == (
         "Open-source QGIS plugin foundation for local tree counting in "
-        "georeferenced aerial imagery. Under active development; not ready "
-        "for production installation."
+        "georeferenced aerial imagery. Under active development; contains "
+        "no inference runtime; contains no external ML dependencies; not "
+        "ready for production use."
     )
     assert values["version"] == "0.1.0"
     assert values["author"] == "Dhany Yudi Prasetyo"
@@ -128,22 +133,57 @@ def test_shell_is_inert_and_does_not_import_non_qgis_ui_dependencies() -> None:
     assert "TreeCounterPlugin" in class_names
 
 
-def test_public_files_do_not_leak_internal_paths_or_instructions() -> None:
-    public_files = [
-        ROOT / "README.md",
-        ROOT / "README.id.md",
-        ROOT / "CONTRIBUTING.md",
-        ROOT / "SECURITY.md",
-        ROOT / "THIRD_PARTY_NOTICES.md",
-        ROOT / "CHANGELOG.md",
-        ROOT / "LICENSE",
-        PACKAGE / "LICENSE",
-        PACKAGE / "metadata.txt",
-        PACKAGE / "__init__.py",
-        PACKAGE / "plugin.py",
-    ]
-    forbidden = ("/" + "Users/", "AGENTS" + ".md", "docs/" + "internal")
+def _tracked_public_text() -> list[tuple[Path, str]]:
+    result = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    tracked = []
+    for raw_path in result.stdout.split(b"\0"):
+        if not raw_path:
+            continue
+        path = ROOT / os.fsdecode(raw_path)
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        tracked.append((path, text))
+    return tracked
 
-    for path in public_files:
-        text = path.read_text(encoding="utf-8")
-        assert not any(value in text for value in forbidden), path
+
+def _forbidden_public_text(text: str) -> bool:
+    lowered = text.casefold()
+    return any(
+        marker in lowered
+        for marker in (
+            "/" + "users/",
+            "agents" + ".md",
+            "docs/" + "internal",
+            "." + "superpowers",
+            "graphify-" + "out",
+        )
+    )
+
+
+def test_all_tracked_public_text_files_do_not_leak_internal_paths() -> None:
+    for path, text in _tracked_public_text():
+        assert not _forbidden_public_text(text), path
+
+
+@pytest.mark.parametrize(
+    "forbidden_text",
+    [
+        "/" + "Users/maintainer/private",
+        "AGENTS" + ".md",
+        "agents" + ".MD",
+        "docs/" + "internal/plan.md",
+        "." + "superpowers/sdd/plan.md",
+        "graphify-" + "out/report.json",
+    ],
+)
+def test_public_text_scanner_catches_forbidden_content(
+    forbidden_text: str,
+) -> None:
+    assert _forbidden_public_text(f"public text with {forbidden_text}")

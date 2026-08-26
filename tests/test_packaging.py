@@ -28,8 +28,11 @@ def test_build_package_has_sorted_single_root_and_fixed_modes(
         infos = handle.infolist()
         names = [info.filename for info in infos]
 
+    from scripts.check_publication import PACKAGE_MANIFEST
+
     assert names == sorted(names)
     assert names
+    assert names == [f"tree_counter/{name}" for name in PACKAGE_MANIFEST]
     assert all(name.startswith("tree_counter/") for name in names)
     assert all("/" in name and not name.startswith("/") for name in names)
     assert all(info.date_time == (1980, 1, 1, 0, 0, 0) for info in infos)
@@ -57,6 +60,11 @@ def test_build_package_preserves_source_bytes_and_is_deterministic(
     "relative_path",
     [
         "tree_counter/.hidden",
+        "tree_counter/" + "AGENTS" + ".md",
+        "tree_counter/" + "agents" + ".MD",
+        "tree_counter/nested/model.safetensors",
+        "tree_counter/icon.png",
+        "tree_counter/archive.zip",
         "tree_counter/internal/notes.md",
         "tree_counter/model.pt",
         "tree_counter/model.pth",
@@ -96,6 +104,32 @@ def test_build_package_rejects_missing_mandatory_files(tmp_path: Path) -> None:
         build_package(repo, tmp_path / "bad.zip")
 
 
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "AGENTS" + ".md",
+        "agents" + ".MD",
+        "nested/README.txt",
+        "model.safetensors",
+        "raster.png",
+        "native.tar.gz",
+    ],
+)
+def test_build_package_rejects_any_file_outside_foundation_manifest(
+    tmp_path: Path, relative_path: str
+) -> None:
+    from scripts.package_plugin import build_package
+
+    repo = tmp_path / "repo"
+    shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(".git"))
+    candidate = repo / "tree_counter" / relative_path
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_bytes(b"unexpected")
+
+    with pytest.raises(ValueError, match="manifest|allowed|unexpected"):
+        build_package(repo, tmp_path / "bad-manifest.zip")
+
+
 def test_build_package_rejects_source_archive_over_20_mib(
     tmp_path: Path,
 ) -> None:
@@ -105,7 +139,7 @@ def test_build_package_rejects_source_archive_over_20_mib(
     shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(".git"))
     # The source file is deliberately just over the archive ceiling.  Stored
     # ZIP members make the resulting size deterministic for this policy test.
-    (repo / "tree_counter" / "large.bin").write_bytes(
+    (repo / "tree_counter" / "plugin.py").write_bytes(
         b"x" * (20 * 1024 * 1024)
     )
 

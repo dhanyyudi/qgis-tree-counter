@@ -34,12 +34,10 @@ dist/
 .vscode/
 
 # Local agent context and internal planning — never commit
-AGENTS.md
-AGENTS.MD
+AGENTS.[mM][dD]
 .agents/
 .plan/
-.superpowers/
-graphify-out/
-docs/internal/
+.[s]uperpowers/
+graphify-[o]ut/
+docs/[i]nternal/
 *.local.md
-

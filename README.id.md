@@ -16,7 +16,7 @@ Targetnya adalah satu paket untuk QGIS 3.44 LTR hingga QGIS 4.x (maksimal 4.99) 
 
 ## Status pengembangan
 
-Lihat [CONTRIBUTING.md](CONTRIBUTING.md) untuk ekspektasi pengembangan dan [CHANGELOG.md](CHANGELOG.md) untuk riwayat rilis. Proyek ini dilisensikan berdasarkan GNU Affero General Public License, hanya versi 3 (AGPL-3.0-only).
+Lihat [CONTRIBUTING.md](CONTRIBUTING.md) untuk ekspektasi pengembangan, [CHANGELOG.md](CHANGELOG.md) untuk riwayat rilis, dan [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) untuk gerbang pemeriksaan sebelum rilis. Proyek ini dilisensikan berdasarkan GNU Affero General Public License, hanya versi 3 (AGPL-3.0-only). Checklist tersebut menjelaskan bahwa matriks uji manual Windows dan macOS harus dicatat lulus sebelum tag atau GitHub Release dibuat; unggahan ke repositori plugin QGIS tetap merupakan tindakan manual.
 
 ## Perintah validasi lokal
 

@@ -21,7 +21,39 @@ from urllib.parse import urlparse
 
 MAX_ARCHIVE_BYTES = 20 * 1024 * 1024
 PACKAGE_NAME = "tree_counter"
-MANDATORY_FILES = ("metadata.txt", "__init__.py", "LICENSE")
+# This is intentionally strict while the repository contains only the inert
+# foundation shell. Feature plans must expand it explicitly when files become
+# part of the distributable plugin.
+PACKAGE_MANIFEST = ("LICENSE", "__init__.py", "metadata.txt", "plugin.py")
+MANDATORY_FILES = PACKAGE_MANIFEST
+EXPECTED_METADATA = {
+    "name": "Tree Counter",
+    "description": (
+        "Count trees in georeferenced aerial imagery with user-provided "
+        "YOLO models."
+    ),
+    "about": (
+        "Open-source QGIS plugin foundation for local tree counting in "
+        "georeferenced aerial imagery. Under active development; contains "
+        "no inference runtime; contains no external ML dependencies; "
+        "not ready for production use."
+    ),
+    "version": "0.1.0",
+    "author": "Dhany Yudi Prasetyo",
+    "email": "dhanyyudi.prasetyo@gmail.com",
+    "homepage": "https://github.com/dhanyyudi/qgis-tree-counter",
+    "repository": "https://github.com/dhanyyudi/qgis-tree-counter",
+    "tracker": "https://github.com/dhanyyudi/qgis-tree-counter/issues",
+    "license": "AGPL-3.0-only",
+    "qgisminimumversion": "3.44",
+    "qgismaximumversion": "4.99",
+    "category": "Raster",
+    "experimental": "True",
+    "deprecated": "False",
+    "tags": "tree counting,YOLO,aerial imagery,geospatial",
+    "hasprocessingprovider": "no",
+    "server": "False",
+}
 FORBIDDEN_EXTENSIONS = {
     ".pt",
     ".pth",
@@ -99,14 +131,29 @@ def _metadata_errors(values: configparser.SectionProxy) -> list[str]:
     if maximum and maximum != "4.99":
         errors.append("metadata maximum QGIS version must be 4.99")
 
-    if values.get("license", "").strip() != "AGPL-3.0-only":
-        errors.append("metadata license must be AGPL-3.0-only")
-
     about = values.get("about", "").lower()
+    for key, expected in EXPECTED_METADATA.items():
+        actual = values.get(key, "").strip()
+        if actual != expected:
+            errors.append(
+                f"metadata {key} must equal the locked foundation value"
+            )
     if "active development" not in about:
+        errors.append("metadata about must disclose active development status")
+    if "no inference runtime" not in about:
         errors.append(
-            "metadata about must include dependency/status disclosure and "
-            "active-development status"
+            "metadata about must disclose that this build has no inference "
+            "runtime"
+        )
+    if "no external ml dependencies" not in about:
+        errors.append(
+            "metadata about must disclose that this build has no external "
+            "ML dependencies"
+        )
+    if "not ready for production use" not in about:
+        errors.append(
+            "metadata about must disclose that this build is not ready for "
+            "production use"
         )
     return errors
 
@@ -128,6 +175,23 @@ def _forbidden_path_error(relative: str) -> str | None:
         return f"forbidden internal path: {relative}"
     if path.suffix.lower() in FORBIDDEN_EXTENSIONS:
         return f"forbidden packaged file type: {relative}"
+    return None
+
+
+def _is_cache_path(relative: str) -> bool:
+    parts = PurePosixPath(relative).parts
+    return "__pycache__" in {part.casefold() for part in parts} or (
+        PurePosixPath(relative).suffix.casefold() in {".pyc", ".pyo"}
+    )
+
+
+def _manifest_error(relative: str) -> str | None:
+    expected = {name.casefold() for name in PACKAGE_MANIFEST}
+    if relative.casefold() not in expected or relative not in PACKAGE_MANIFEST:
+        return (
+            "package file is not allowed by the foundation manifest: "
+            f"{PACKAGE_NAME}/{relative}"
+        )
     return None
 
 
@@ -200,10 +264,7 @@ def validate_source(repo_root: Path) -> list[str]:
         relative_path = path.relative_to(package).as_posix()
         # Python bytecode and caches are local test artifacts and are never
         # considered for packaging; all other files must pass the policy.
-        if (
-            "__pycache__" in PurePosixPath(relative_path).parts
-            or path.suffix in {".pyc", ".pyo"}
-        ):
+        if _is_cache_path(relative_path):
             continue
         if path.is_symlink():
             errors.append(
@@ -216,6 +277,9 @@ def validate_source(repo_root: Path) -> list[str]:
         forbidden = _forbidden_path_error(relative_path)
         if forbidden:
             errors.append(forbidden)
+        manifest_error = _manifest_error(relative_path)
+        if manifest_error:
+            errors.append(manifest_error)
         canonical = "/".join(
             part.casefold() for part in relative_path.split("/")
         )
@@ -296,6 +360,9 @@ def validate_archive(archive_path: Path) -> list[str]:
                 forbidden = _forbidden_path_error(relative)
                 if forbidden:
                     errors.append(forbidden)
+                manifest_error = _manifest_error(relative)
+                if manifest_error:
+                    errors.append(manifest_error)
                 mode = (info.external_attr >> 16) & 0xFFFF
                 file_type = stat.S_IFMT(mode)
                 if file_type == stat.S_IFLNK:
@@ -314,10 +381,18 @@ def validate_archive(archive_path: Path) -> list[str]:
                 if ((info.external_attr >> 16) & 0o777) != 0o644:
                     errors.append(f"archive member mode must be 0644: {name}")
 
-            for required in MANDATORY_FILES:
+            canonical_package_names = {
+                relative.casefold() for relative in package_names
+            }
+            for required in PACKAGE_MANIFEST:
                 if required not in package_names:
                     errors.append(
                         "archive missing mandatory file: "
+                        f"{PACKAGE_NAME}/{required}"
+                    )
+                if required.casefold() not in canonical_package_names:
+                    errors.append(
+                        "archive missing foundation manifest file: "
                         f"{PACKAGE_NAME}/{required}"
                     )
 
