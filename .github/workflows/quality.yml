@@ -34,10 +34,13 @@ jobs:
         run: python -m flake8 tree_counter scripts tests
 
       - name: Run Bandit
-        run: python -m bandit -r tree_counter scripts
+        run: python -m bandit --ini .bandit -r tree_counter scripts
 
-      - name: Run detect-secrets
-        run: detect-secrets scan --baseline .secrets.baseline
+      - name: Run blocking detect-secrets hook
+        shell: bash
+        run: |
+          set -o pipefail
+          git ls-files -z | xargs -0 detect-secrets-hook --baseline .secrets.baseline
 
       - name: Validate source publication policy
         run: python scripts/check_publication.py

@@ -32,6 +32,20 @@ def _required_commands(workflow: str) -> None:
         assert command in workflow, f"workflow omits required gate: {command}"
 
 
+def _required_blocking_scanners(workflow: str) -> None:
+    detect_secrets_command = (
+        "git ls-files -z | xargs -0 detect-secrets-hook --baseline "
+        ".secrets.baseline"
+    )
+    assert detect_secrets_command in workflow
+    assert "detect-secrets scan" not in workflow
+    assert "python -m bandit --ini .bandit -r tree_counter scripts" in workflow
+    assert not re.search(r"python -m bandit\s+-r\b", workflow)
+    bandit_commands = re.findall(r"python -m bandit[^\n]*", workflow)
+    assert bandit_commands
+    assert all("--ini .bandit" in command for command in bandit_commands)
+
+
 def test_quality_workflow_has_blocking_triggers_permissions_gates_and_artifact(
 ) -> None:
     workflow = _workflow("quality.yml")
@@ -48,6 +62,7 @@ def test_quality_workflow_has_blocking_triggers_permissions_gates_and_artifact(
         "version }}.zip"
     )
     assert archive_pattern in workflow
+    _required_blocking_scanners(workflow)
 
 
 def test_release_workflow_is_tagged_minimal_and_repeats_quality_gates(
@@ -67,6 +82,7 @@ def test_release_workflow_is_tagged_minimal_and_repeats_quality_gates(
     assert "plugins.qgis.org" not in workflow.lower()
     assert "OSGEO" not in workflow.upper()
     assert "qgis_password" not in workflow.lower()
+    _required_blocking_scanners(workflow)
 
 
 def test_only_release_workflow_can_request_contents_write() -> None:
