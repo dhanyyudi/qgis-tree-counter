@@ -78,12 +78,19 @@ def test_the_shipped_catalog_covers_the_release_platforms() -> None:
         for profile in component.profiles
     }
 
-    assert {
-        "windows-x86_64",
-        "macos-arm64",
-        "macos-x86_64",
-        "linux-x86_64",
-    } <= platforms
+    assert {"windows-x86_64", "macos-arm64", "linux-x86_64"} <= platforms
+
+
+def test_macos_intel_has_no_runtime_profile() -> None:
+    from tree_counter.runtime.catalog import load_catalog
+
+    # Neither PyTorch 2.13 nor ONNX Runtime 1.29 publishes a macOS x86_64
+    # wheel for Python 3.12, so no runtime can be provisioned there. The
+    # plugin itself still loads on Intel; only the runtime is unavailable.
+    catalog = load_catalog()
+
+    for component in catalog.components.values():
+        assert catalog.profile_for(component.name, "macos-x86_64") is None
 
 
 def test_the_shipped_catalog_offers_both_components() -> None:

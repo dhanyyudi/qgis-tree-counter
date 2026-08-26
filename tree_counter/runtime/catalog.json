@@ -13,32 +13,35 @@
     "onnxruntime": {
       "title": "ONNX Runtime (CPU)",
       "recommended": true,
-      "imports": ["numpy", "onnxruntime"],
+      "imports": [
+        "numpy",
+        "onnxruntime"
+      ],
       "profiles": [
         {
           "platform": "windows-x86_64",
-          "accelerators": ["cpu"],
+          "accelerators": [
+            "cpu"
+          ],
           "lock": "windows-x86_64/onnxruntime.txt",
           "index_url": "https://pypi.org/simple",
           "estimated_download_bytes": 55000000
         },
         {
           "platform": "macos-arm64",
-          "accelerators": ["cpu", "coreml"],
+          "accelerators": [
+            "cpu",
+            "coreml"
+          ],
           "lock": "macos-arm64/onnxruntime.txt",
           "index_url": "https://pypi.org/simple",
           "estimated_download_bytes": 45000000
         },
         {
-          "platform": "macos-x86_64",
-          "accelerators": ["cpu"],
-          "lock": "macos-x86_64/onnxruntime.txt",
-          "index_url": "https://pypi.org/simple",
-          "estimated_download_bytes": 45000000
-        },
-        {
           "platform": "linux-x86_64",
-          "accelerators": ["cpu"],
+          "accelerators": [
+            "cpu"
+          ],
           "lock": "linux-x86_64/onnxruntime.txt",
           "index_url": "https://pypi.org/simple",
           "estimated_download_bytes": 55000000
@@ -48,32 +51,36 @@
     "pytorch": {
       "title": "PyTorch and Ultralytics (trusted .pt checkpoints)",
       "recommended": false,
-      "imports": ["numpy", "torch", "ultralytics"],
+      "imports": [
+        "numpy",
+        "torch",
+        "ultralytics"
+      ],
       "profiles": [
         {
           "platform": "windows-x86_64",
-          "accelerators": ["cpu"],
+          "accelerators": [
+            "cpu"
+          ],
           "lock": "windows-x86_64/pytorch.txt",
           "index_url": "https://pypi.org/simple",
           "estimated_download_bytes": 320000000
         },
         {
           "platform": "macos-arm64",
-          "accelerators": ["cpu", "mps"],
+          "accelerators": [
+            "cpu",
+            "mps"
+          ],
           "lock": "macos-arm64/pytorch.txt",
           "index_url": "https://pypi.org/simple",
           "estimated_download_bytes": 250000000
         },
         {
-          "platform": "macos-x86_64",
-          "accelerators": ["cpu"],
-          "lock": "macos-x86_64/pytorch.txt",
-          "index_url": "https://pypi.org/simple",
-          "estimated_download_bytes": 250000000
-        },
-        {
           "platform": "linux-x86_64",
-          "accelerators": ["cpu"],
+          "accelerators": [
+            "cpu"
+          ],
           "lock": "linux-x86_64/pytorch.txt",
           "index_url": "https://pypi.org/simple",
           "estimated_download_bytes": 900000000

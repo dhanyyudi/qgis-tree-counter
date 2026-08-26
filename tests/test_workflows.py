@@ -27,6 +27,7 @@ def _required_commands(workflow: str) -> None:
         "bandit",
         "detect-secrets",
         "scripts/check_publication.py",
+        "scripts/check_runtime_locks.py",
         "scripts/package_plugin.py",
     ):
         assert command in workflow, f"workflow omits required gate: {command}"

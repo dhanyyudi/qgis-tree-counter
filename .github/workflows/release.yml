@@ -40,6 +40,9 @@ jobs:
           set -o pipefail
           git ls-files -z | xargs -0 detect-secrets-hook --baseline .secrets.baseline
 
+      - name: Validate runtime dependency locks
+        run: python scripts/check_runtime_locks.py
+
       - name: Validate source publication policy
         run: python scripts/check_publication.py
 
@@ -112,6 +115,9 @@ jobs:
         run: |
           set -o pipefail
           git ls-files -z | xargs -0 detect-secrets-hook --baseline .secrets.baseline
+
+      - name: Validate runtime dependency locks
+        run: python scripts/check_runtime_locks.py
 
       - name: Validate source publication policy
         run: python scripts/check_publication.py
