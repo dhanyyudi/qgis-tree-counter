@@ -175,6 +175,25 @@ def _types(messages: list[dict[str, object]]) -> list[str]:
     return [str(message["type"]) for message in messages]
 
 
+def _detections(messages: list[dict[str, object]]) -> list[dict]:
+    """Reassemble the result set the way the host does, batch by batch."""
+
+    batches = [item for item in messages if item["type"] == "detections"]
+    assert [item["batch_index"] for item in batches] == list(
+        range(len(batches))
+    )
+    collected: list[dict] = []
+    for batch in batches:
+        collected.extend(batch["detections"])
+    completed = [
+        item for item in messages if item["type"] == "run_completed"
+    ]
+    if completed:
+        assert completed[0]["detection_count"] == len(collected)
+        assert completed[0]["batch_count"] == len(batches)
+    return collected
+
+
 def test_handshake_reports_a_worker_hello(session) -> None:
     worker = session(TREE_COUNTER_WORKER_BACKEND="fake")
     worker.send(_hello())
@@ -235,6 +254,7 @@ def test_full_run_emits_progress_and_deduplicated_detections(
         "progress",
         "tile_completed",
         "progress",
+        "detections",
         "run_completed",
     ]
     # Each tile yields one surviving detection: one is suppressed by NMS,
@@ -252,7 +272,7 @@ def test_full_run_emits_progress_and_deduplicated_detections(
     assert all(item["total_tiles"] == 2 for item in progress)
 
     completed = messages[-1]
-    detections = completed["detections"]
+    detections = _detections(messages)
     assert len(detections) == 2
     assert detections[0]["box"] == [1.0, 1.0, 11.0, 11.0]
     assert detections[1]["box"] == [513.0, 1.0, 523.0, 11.0]
@@ -284,7 +304,7 @@ def test_overlapping_tiles_merge_into_one_detection(
     code, messages, _ = worker.finish()
 
     assert code == 0
-    detections = messages[-1]["detections"]
+    detections = _detections(messages)
     assert len(detections) == 1
     assert detections[0]["merged_count"] == 2
     assert detections[0]["tile_ids"] == ["r00000_c00000", "r00000_c00001"]
@@ -313,7 +333,7 @@ def test_multi_class_detections_are_never_merged(
     code, messages, _ = worker.finish()
 
     assert code == 0
-    detections = messages[-1]["detections"]
+    detections = _detections(messages)
     assert sorted(item["class_id"] for item in detections) == [0, 1]
 
 
@@ -344,7 +364,7 @@ def test_selected_classes_restrict_the_result(
     code, messages, _ = worker.finish()
 
     assert code == 0
-    detections = messages[-1]["detections"]
+    detections = _detections(messages)
     assert [item["class_id"] for item in detections] == [1]
 
 
@@ -596,9 +616,13 @@ class TestBootstrap:
     def test_it_never_writes_bytecode_into_the_plugin(
         self, session
     ) -> None:
-        before = sorted(
-            path.name for path in REPO_ROOT.rglob("__pycache__")
-        )
+        # Isolated mode ignores PYTHONDONTWRITEBYTECODE, so the bootstrap
+        # has to disable bytecode writing itself. Compare the exact set of
+        # compiled files before and after: other tooling may already have
+        # left caches here, but this run must add none.
+        package = REPO_ROOT / "tree_counter"
+        before = {path for path in package.rglob("*.py[co]")}
+
         worker = session(bootstrap=True, TREE_COUNTER_WORKER_BACKEND="fake")
         worker.send(_hello())
         worker.send(
@@ -607,11 +631,7 @@ class TestBootstrap:
         code, _, _ = worker.finish()
 
         assert code == 0
-        assert not list((REPO_ROOT / "tree_counter").rglob("__pycache__"))
-        assert (
-            sorted(path.name for path in REPO_ROOT.rglob("__pycache__"))
-            == before
-        )
+        assert {path for path in package.rglob("*.py[co]")} == before
 
     def test_it_rejects_command_line_arguments(self) -> None:
         completed = subprocess.run(
@@ -670,3 +690,69 @@ class TestBootstrap:
         assert result.count(str(REPO_ROOT)) == 1
         assert "" not in result
         assert "." not in result
+
+
+def test_a_result_set_larger_than_one_message_is_streamed(
+    session, tmp_path: Path
+) -> None:
+    from tree_counter.core.protocol import (
+        MAX_MESSAGE_BYTES,
+        ProtocolError,
+        encode_message,
+    )
+
+    # A single JSONL line is capped, so a large-area count must arrive in
+    # batches instead of failing with a protocol error. The load is spread
+    # over tiles the way a real run spreads it, rather than piling an
+    # unrealistic number of detections into one tile.
+    per_tile = 500
+    tiles = 20
+    total = per_tile * tiles
+    tile = _write_tile(tmp_path, "tile_a.png")
+    worker = session(
+        TREE_COUNTER_WORKER_BACKEND="fake",
+        TREE_COUNTER_FAKE_BULK_DETECTIONS=str(per_tile),
+    )
+    worker.send(_hello())
+    worker.send(_start_run(tmp_path, tiles))
+    for index in range(tiles):
+        worker.send(
+            _tile_message(
+                f"r00000_c{index:05d}", tile, x_offset=index * 1000
+            )
+        )
+    worker.send(
+        {
+            "type": "finish_tiles",
+            "protocol_version": 1,
+            "request_id": "req-finish",
+            "run_id": "run-1",
+        }
+    )
+
+    code, messages, stderr = worker.finish()
+
+    assert code == 0
+    assert stderr == ""
+    detections = _detections(messages)
+    assert len(detections) == total
+
+    # The whole set genuinely does not fit in one line, so batching is
+    # what makes this run possible rather than a stylistic choice.
+    with pytest.raises(ProtocolError):
+        encode_message(
+            {
+                "type": "run_completed",
+                "protocol_version": 1,
+                "request_id": "req-finish",
+                "run_id": "run-1",
+                "detections": detections,
+                "duration_seconds": 1.0,
+            }
+        )
+    batches = [item for item in messages if item["type"] == "detections"]
+    assert len(batches) > 1
+    for batch in batches:
+        assert batch["detections"]
+        assert len(encode_message(batch)) <= MAX_MESSAGE_BYTES
+    assert _types(messages)[-1] == "run_completed"

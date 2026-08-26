@@ -11,9 +11,10 @@ diagnostics never reach stdout.
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,8 @@ from tree_counter.constants import PROTOCOL_VERSION
 from tree_counter.core.dedup import deduplicate_detections
 from tree_counter.core.nms import apply_nms_per_class
 from tree_counter.core.protocol import (
+    MAX_BATCH_PAYLOAD_BYTES,
+    MAX_DETECTIONS_PER_BATCH,
     ProtocolError,
     WorkerStateMachine,
     decode_message,
@@ -80,6 +83,35 @@ def resolve_backend_factory(
         return module.create_backend()
 
     return _factory
+
+
+def _batch_detections(
+    detections: Sequence[Detection],
+) -> Iterator[list[dict[str, object]]]:
+    """Split detections into batches that each fit in one protocol line.
+
+    A run over a large area can produce far more detections than a single
+    JSONL message may carry, so batches are accumulated against a byte
+    budget as well as a count cap. A batch always holds at least one
+    detection, so no detection is ever split across messages.
+    """
+
+    batch: list[dict[str, object]] = []
+    size = 0
+    for detection in detections:
+        payload = _detection_payload(detection)
+        payload_size = len(json.dumps(payload, ensure_ascii=True)) + 1
+        if batch and (
+            size + payload_size > MAX_BATCH_PAYLOAD_BYTES
+            or len(batch) >= MAX_DETECTIONS_PER_BATCH
+        ):
+            yield batch
+            batch = []
+            size = 0
+        batch.append(payload)
+        size += payload_size
+    if batch:
+        yield batch
 
 
 def _detection_payload(detection: Detection) -> dict[str, object]:
@@ -430,15 +462,27 @@ class WorkerRunner:
         final = deduplicate_detections(
             self._detections, settings.duplicate_iou
         )
+        batch_count = 0
+        for batch in _batch_detections(final):
+            self._send(
+                {
+                    "type": "detections",
+                    "protocol_version": PROTOCOL_VERSION,
+                    "request_id": message["request_id"],
+                    "run_id": self._run_id,
+                    "batch_index": batch_count,
+                    "detections": batch,
+                }
+            )
+            batch_count += 1
         self._send(
             {
                 "type": "run_completed",
                 "protocol_version": PROTOCOL_VERSION,
                 "request_id": message["request_id"],
                 "run_id": self._run_id,
-                "detections": [
-                    _detection_payload(detection) for detection in final
-                ],
+                "detection_count": len(final),
+                "batch_count": batch_count,
                 "duration_seconds": max(
                     0.0, self._clock() - self._started_at
                 ),

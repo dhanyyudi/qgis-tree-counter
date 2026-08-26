@@ -177,6 +177,55 @@ def test_nms_keeps_pairs_below_the_threshold() -> None:
     assert len(apply_nms((first, second), threshold)) == 2
 
 
+def test_a_zero_threshold_keeps_disjoint_detections() -> None:
+    from tree_counter.core.nms import apply_nms
+
+    # nms_iou=0 means "suppress anything that overlaps at all", never
+    # "suppress everything": disjoint boxes have an IoU of 0.0 and must
+    # survive, or a whole tile would collapse to one detection per class.
+    detections = (
+        _detection(0, 0, 10, 10, 0.90),
+        _detection(1000, 0, 1010, 10, 0.80),
+        _detection(2000, 0, 2010, 10, 0.70),
+    )
+
+    assert len(apply_nms(detections, 0.0)) == 3
+
+
+def test_a_zero_threshold_still_suppresses_any_overlap() -> None:
+    from tree_counter.core.nms import apply_nms
+
+    detections = (
+        _detection(0, 0, 10, 10, 0.90),
+        _detection(9, 0, 19, 10, 0.80),
+    )
+
+    assert len(apply_nms(detections, 0.0)) == 1
+
+
+def test_a_zero_threshold_keeps_edge_touching_detections() -> None:
+    from tree_counter.core.nms import apply_nms
+
+    detections = (
+        _detection(0, 0, 10, 10, 0.90),
+        _detection(10, 0, 20, 10, 0.80),
+    )
+
+    assert len(apply_nms(detections, 0.0)) == 2
+
+
+def test_overlaps_at_threshold_requires_real_overlap() -> None:
+    from tree_counter.core.nms import overlaps_at_threshold
+
+    assert overlaps_at_threshold(_box(0, 0, 10, 10), _box(9, 0, 19, 10), 0.0)
+    assert not overlaps_at_threshold(
+        _box(0, 0, 10, 10), _box(50, 50, 60, 60), 0.0
+    )
+    assert not overlaps_at_threshold(
+        _box(0, 0, 10, 10), _box(10, 0, 20, 10), 0.0
+    )
+
+
 def test_nms_never_suppresses_a_different_class() -> None:
     from tree_counter.core.nms import apply_nms
 

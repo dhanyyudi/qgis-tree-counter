@@ -43,6 +43,19 @@ def box_iou(left: Any, right: Any) -> float:
     return intersection / union
 
 
+def overlaps_at_threshold(left: Any, right: Any, threshold: float) -> bool:
+    """Return whether two boxes overlap and meet an inclusive IoU threshold.
+
+    A threshold of ``0`` is a legal setting meaning "treat anything that
+    overlaps at all as the same detection". Boxes that do not overlap have
+    an IoU of ``0.0``, so a zero IoU is never a match: without this guard a
+    zero threshold would collapse every same-class detection into one.
+    """
+
+    iou = box_iou(left, right)
+    return iou > 0.0 and iou >= threshold
+
+
 def detection_sort_key(detection: Detection) -> SortKey:
     """Return the stable ordering key used by suppression and dedup.
 
@@ -100,9 +113,11 @@ def apply_nms(
 
     Confidence filtering always runs before suppression so a discarded
     detection can never suppress a surviving one. Suppression is inclusive:
-    a candidate whose IoU equals *iou_threshold* is removed. Detections of
-    different classes never suppress each other, and provenance is left
-    untouched because cross-tile merging is a separate operation.
+    a candidate whose IoU equals *iou_threshold* is removed, except that
+    boxes which do not overlap are never suppressed even at a zero
+    threshold. Detections of different classes never suppress each other,
+    and provenance is left untouched because cross-tile merging is a
+    separate operation.
     """
 
     threshold = validate_iou(iou_threshold, "nms_iou")
@@ -113,7 +128,7 @@ def apply_nms(
     for candidate in sorted(candidates, key=detection_sort_key):
         if any(
             existing.class_id == candidate.class_id
-            and box_iou(existing.box, candidate.box) >= threshold
+            and overlaps_at_threshold(existing.box, candidate.box, threshold)
             for existing in kept
         ):
             continue
@@ -153,4 +168,5 @@ __all__ = [
     "box_iou",
     "detection_sort_key",
     "filter_by_confidence",
+    "overlaps_at_threshold",
 ]

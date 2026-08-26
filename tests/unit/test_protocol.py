@@ -116,11 +116,20 @@ WORKER_MESSAGES: tuple[dict[str, object], ...] = (
         "message": "Falling back to CPU.",
     },
     {
+        "type": "detections",
+        "protocol_version": 1,
+        "request_id": "req-4",
+        "run_id": "run-1",
+        "batch_index": 0,
+        "detections": [],
+    },
+    {
         "type": "run_completed",
         "protocol_version": 1,
         "request_id": "req-4",
         "run_id": "run-1",
-        "detections": [],
+        "detection_count": 0,
+        "batch_count": 1,
         "duration_seconds": 1.5,
     },
     {"type": "cancelled", "protocol_version": 1, "request_id": "req-5"},
@@ -459,7 +468,8 @@ def test_validation_rejects_non_finite_worker_numbers() -> None:
         "protocol_version": 1,
         "request_id": "req-4",
         "run_id": "run-1",
-        "detections": [],
+        "detection_count": 0,
+        "batch_count": 0,
         "duration_seconds": float("nan"),
     }
     with pytest.raises(ProtocolError):
@@ -625,3 +635,34 @@ def test_decode_ignores_trailing_whitespace_only() -> None:
 
     payload = json.dumps({"type": "hello"}).encode("utf-8")
     assert decode_message(payload + b"\r\n") == {"type": "hello"}
+
+
+def test_a_detection_batch_budget_fits_inside_one_line() -> None:
+    from tree_counter.core.protocol import (
+        MAX_BATCH_PAYLOAD_BYTES,
+        MAX_MESSAGE_BYTES,
+    )
+
+    # The budget must leave room for the envelope around the batch.
+    assert 0 < MAX_BATCH_PAYLOAD_BYTES < MAX_MESSAGE_BYTES
+
+
+def test_run_completed_no_longer_carries_the_result_set() -> None:
+    from tree_counter.core.protocol import (
+        ProtocolError,
+        validate_worker_message,
+    )
+
+    # A result set has no size ceiling; it arrives in detections batches.
+    message = {
+        "type": "run_completed",
+        "protocol_version": 1,
+        "request_id": "req-4",
+        "run_id": "run-1",
+        "detection_count": 2,
+        "batch_count": 1,
+        "duration_seconds": 1.5,
+        "detections": [],
+    }
+    with pytest.raises(ProtocolError):
+        validate_worker_message(message)

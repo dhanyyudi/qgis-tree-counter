@@ -54,6 +54,9 @@ class FakeBackend:
         failing = os.environ.get("TREE_COUNTER_FAKE_FAIL_ON_TILE")
         if failing and failing == tile["tile_id"]:
             raise FakeBackendFailure("scripted tile failure")
+        bulk = int(os.environ.get("TREE_COUNTER_FAKE_BULK_DETECTIONS", "0"))
+        if bulk:
+            return self._bulk(bulk)
         detections: list[dict[str, Any]] = [
             {
                 "box": [1.0, 1.0, 11.0, 11.0],
@@ -101,6 +104,29 @@ class FakeBackend:
                 }
             )
         return detections
+
+    def _bulk(self, count: int) -> list[dict[str, Any]]:
+        """Return *count* well-separated boxes on a fixed grid.
+
+        Nothing here overlaps, so every box survives NMS and dedup and the
+        result set is exactly *count* detections.
+        """
+
+        columns = 100
+        return [
+            {
+                "box": [
+                    float((index % columns) * 5),
+                    float((index // columns) * 5),
+                    float((index % columns) * 5) + 4.0,
+                    float((index // columns) * 5) + 4.0,
+                ],
+                "confidence": 0.9,
+                "class_id": 0,
+                "class_name": self._class_names[0],
+            }
+            for index in range(count)
+        ]
 
     def close(self) -> None:
         self.closed = True

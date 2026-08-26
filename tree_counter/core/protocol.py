@@ -5,6 +5,11 @@ message carries ``protocol_version`` and ``request_id``; run messages also
 carry ``run_id``. Validation fails closed: unknown versions, unknown types,
 unknown fields, non-finite numbers, oversized lines, duplicate JSON keys,
 and unsafe tile paths are all rejected rather than interpreted.
+
+Because a line is capped at :data:`MAX_MESSAGE_BYTES`, a result set is not
+a single message: the worker streams ``detections`` batches sized to stay
+inside that cap and then sends one ``run_completed`` carrying the totals.
+A large-area count therefore has no result-size ceiling of its own.
 """
 
 # SPDX-License-Identifier: AGPL-3.0-only
@@ -20,6 +25,10 @@ from tree_counter.constants import PROTOCOL_VERSION
 from tree_counter.errors import ErrorCode, TreeCounterError
 
 MAX_MESSAGE_BYTES = 1024 * 1024
+# Batches are built against this budget rather than the hard cap so a
+# detection is never split and the envelope always fits.
+MAX_BATCH_PAYLOAD_BYTES = MAX_MESSAGE_BYTES // 2
+MAX_DETECTIONS_PER_BATCH = 1000
 MAX_IDENTIFIER_LENGTH = 128
 MAX_TEXT_LENGTH = 4096
 
@@ -215,9 +224,15 @@ WORKER_SCHEMAS: dict[str, dict[str, _Field]] = {
         "message": _Field("text"),
         "run_id": _Field("identifier", required=False),
     },
+    "detections": {
+        "run_id": _Field("identifier"),
+        "batch_index": _Field("non_negative_int"),
+        "detections": _Field("list"),
+    },
     "run_completed": {
         "run_id": _Field("identifier"),
-        "detections": _Field("list"),
+        "detection_count": _Field("non_negative_int"),
+        "batch_count": _Field("non_negative_int"),
         "duration_seconds": _Field("finite"),
     },
     "cancelled": {"run_id": _Field("identifier", required=False)},
@@ -432,6 +447,8 @@ class WorkerStateMachine:
 __all__ = [
     "HOST_MESSAGE_TYPES",
     "HOST_SCHEMAS",
+    "MAX_BATCH_PAYLOAD_BYTES",
+    "MAX_DETECTIONS_PER_BATCH",
     "MAX_IDENTIFIER_LENGTH",
     "MAX_MESSAGE_BYTES",
     "MAX_TEXT_LENGTH",

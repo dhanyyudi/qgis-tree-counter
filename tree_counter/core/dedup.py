@@ -8,7 +8,7 @@ import math
 from collections.abc import Iterable
 from typing import Any
 
-from tree_counter.core.nms import box_iou, detection_sort_key
+from tree_counter.core.nms import detection_sort_key, overlaps_at_threshold
 from tree_counter.core.types import Detection
 from tree_counter.core.validation import validate_iou
 from tree_counter.errors import ValidationError
@@ -86,9 +86,10 @@ def deduplicate_detections(
     Candidates are processed in descending confidence with stable
     tie-breakers, so the surviving geometry is always the highest-confidence
     box and the result does not depend on input order. Merging is inclusive
-    at *duplicate_iou*, unions the sorted contributing tile IDs, and
-    accumulates ``merged_count``. Detections of different classes are never
-    merged.
+    at *duplicate_iou* but always requires real overlap, so a zero threshold
+    never merges disjoint boxes that happen to share a grid cell. Merging
+    unions the sorted contributing tile IDs and accumulates
+    ``merged_count``. Detections of different classes are never merged.
 
     A spatial grid keyed by class and cell restricts comparisons to boxes
     that can actually overlap; because every box is inserted into each cell
@@ -111,7 +112,7 @@ def deduplicate_detections(
         absorbed_by: int | None = None
         for index in sorted(nearby):
             existing = kept[index]
-            if box_iou(existing.box, candidate.box) >= threshold:
+            if overlaps_at_threshold(existing.box, candidate.box, threshold):
                 absorbed_by = index
                 break
         if absorbed_by is None:

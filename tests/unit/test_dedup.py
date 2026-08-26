@@ -56,7 +56,8 @@ def _reference_deduplicate(detections, duplicate_iou):
         for index, existing in enumerate(kept):
             if existing.class_id != candidate.class_id:
                 continue
-            if box_iou(existing.box, candidate.box) >= duplicate_iou:
+            overlap = box_iou(existing.box, candidate.box)
+            if overlap > 0.0 and overlap >= duplicate_iou:
                 merged_ids = tuple(
                     sorted(set(existing.tile_ids) | set(candidate.tile_ids))
                 )
@@ -146,6 +147,50 @@ def test_merging_accumulates_existing_merged_counts() -> None:
     kept = deduplicate_detections(detections, 0.5)
 
     assert kept[0].merged_count == 5
+
+
+def test_a_zero_threshold_keeps_disjoint_detections() -> None:
+    from tree_counter.core.dedup import deduplicate_detections
+
+    detections = (
+        _detection(0, 0, 10, 10, 0.90),
+        _detection(1000, 0, 1010, 10, 0.80),
+        _detection(2000, 0, 2010, 10, 0.70),
+    )
+
+    assert len(deduplicate_detections(detections, 0.0)) == 3
+
+
+def test_a_zero_threshold_result_is_independent_of_grid_placement() -> None:
+    from tree_counter.core.dedup import deduplicate_detections
+
+    # These two boxes are disjoint but close enough to share a grid cell.
+    # A grid is an index, not a rule: it must not change the outcome.
+    adjacent = (
+        _detection(0, 0, 10, 10, 0.90),
+        _detection(11, 0, 21, 10, 0.80),
+    )
+    distant = (
+        _detection(0, 0, 10, 10, 0.90),
+        _detection(5000, 0, 5010, 10, 0.80),
+    )
+
+    assert len(deduplicate_detections(adjacent, 0.0)) == 2
+    assert len(deduplicate_detections(distant, 0.0)) == 2
+
+
+def test_a_zero_threshold_still_merges_any_overlap() -> None:
+    from tree_counter.core.dedup import deduplicate_detections
+
+    detections = (
+        _detection(0, 0, 10, 10, 0.90),
+        _detection(9, 0, 19, 10, 0.80),
+    )
+
+    kept = deduplicate_detections(detections, 0.0)
+
+    assert len(kept) == 1
+    assert kept[0].merged_count == 2
 
 
 def test_different_classes_are_never_merged() -> None:
@@ -253,7 +298,7 @@ def test_indexed_result_matches_the_reference_on_seeded_cases() -> None:
                     tile_ids=(f"r00000_c{rng.randrange(9):05d}",),
                 )
             )
-        threshold = rng.choice((0.1, 0.3, 0.5, 0.7, 0.9))
+        threshold = rng.choice((0.0, 0.1, 0.3, 0.5, 0.7, 0.9))
         assert deduplicate_detections(
             tuple(detections), threshold
         ) == _reference_deduplicate(tuple(detections), threshold), (
