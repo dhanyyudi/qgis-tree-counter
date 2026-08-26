@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import shutil
+import stat
+import struct
 import zipfile
 from pathlib import Path
 
@@ -94,6 +96,7 @@ def test_validate_archive_rejects_bad_root_and_source_mismatch(
     [
         "tree_counter/tests/test.py",
         "tree_counter/__pycache__/module.pyc",
+        "tree_counter/module.pyo",
         "tree_counter/.secret",
         "tree_counter/model.pt",
         "tree_counter/raster.tiff",
@@ -117,3 +120,157 @@ def test_validate_archive_rejects_forbidden_members(
 
     errors = validate_archive(archive)
     assert any("forbidden" in error.lower() for error in errors)
+
+
+def _valid_archive(tmp_path: Path) -> Path:
+    from scripts.package_plugin import build_package
+
+    return build_package(ROOT, tmp_path / "valid.zip")
+
+
+def test_validate_archive_reports_crc_corruption_without_raising(
+    tmp_path: Path,
+) -> None:
+    from scripts.check_publication import validate_archive
+
+    source = _valid_archive(tmp_path)
+    corrupted = tmp_path / "corrupted.zip"
+    data = bytearray(source.read_bytes())
+    with zipfile.ZipFile(source) as handle:
+        info = handle.infolist()[0]
+        payload_start = (
+            info.header_offset
+            + 30
+            + len(info.filename.encode())
+            + len(info.extra)
+        )
+        data[payload_start] ^= 0xFF
+    corrupted.write_bytes(data)
+
+    errors = validate_archive(corrupted)
+    assert any(
+        any(token in error.lower() for token in ("crc", "corrupt", "read"))
+        for error in errors
+    )
+
+
+def test_validate_archive_reports_unsupported_compression_without_raising(
+    tmp_path: Path,
+) -> None:
+    from scripts.check_publication import validate_archive
+
+    source = _valid_archive(tmp_path)
+    unsupported = tmp_path / "unsupported.zip"
+    data = bytearray(source.read_bytes())
+    with zipfile.ZipFile(source) as handle:
+        info = handle.infolist()[0]
+        local_method = info.header_offset + 8
+        data[local_method:local_method + 2] = struct.pack("<H", 99)
+    central = data.find(b"PK\x01\x02")
+    assert central >= 0
+    data[central + 10:central + 12] = struct.pack("<H", 99)
+    unsupported.write_bytes(data)
+
+    errors = validate_archive(unsupported)
+    assert any(
+        any(
+            token in error.lower()
+            for token in ("compress", "unsupported", "read")
+        )
+        for error in errors
+    )
+
+
+def test_validate_archive_rejects_unix_symlink_member(tmp_path: Path) -> None:
+    from scripts.check_publication import validate_archive
+
+    archive = tmp_path / "symlink.zip"
+    with zipfile.ZipFile(archive, "w") as handle:
+        for member in ("__init__.py", "LICENSE", "metadata.txt"):
+            info = zipfile.ZipInfo(f"tree_counter/{member}")
+            info.external_attr = (stat.S_IFREG | 0o644) << 16
+            handle.writestr(info, b"[general]\n")
+        info = zipfile.ZipInfo("tree_counter/link")
+        info.create_system = 3
+        info.external_attr = (stat.S_IFLNK | 0o777) << 16
+        handle.writestr(info, b"target")
+
+    errors = validate_archive(archive)
+    assert any("symlink" in error.lower() for error in errors)
+
+
+def test_validate_source_reports_missing_root_license(
+    tmp_path: Path,
+) -> None:
+    from scripts.check_publication import validate_source
+
+    repo = tmp_path / "repo"
+    shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(".git"))
+    (repo / "LICENSE").unlink()
+
+    errors = validate_source(repo)
+    assert any(
+        "root" in error.lower() and "license" in error.lower()
+        for error in errors
+    )
+
+
+def test_validate_source_catches_malformed_url_without_raising(
+    tmp_path: Path,
+) -> None:
+    from scripts.check_publication import validate_source
+
+    repo = tmp_path / "repo"
+    shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(".git"))
+    metadata = repo / "tree_counter" / "metadata.txt"
+    text = metadata.read_text(encoding="utf-8").replace(
+        "homepage=https://github.com/dhanyyudi/qgis-tree-counter",
+        "homepage=https://[bad",
+    )
+    metadata.write_text(text, encoding="utf-8")
+
+    errors = validate_source(repo)
+    assert any("homepage" in error.lower() for error in errors)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "tree_counter/./plugin.py",
+        "tree_counter//plugin.py",
+        "tree_counter/Foo.txt",
+    ],
+)
+def test_validate_archive_rejects_noncanonical_or_colliding_paths(
+    tmp_path: Path, name: str
+) -> None:
+    from scripts.check_publication import validate_archive
+
+    archive = tmp_path / "paths.zip"
+    with zipfile.ZipFile(archive, "w") as handle:
+        for member in ("__init__.py", "LICENSE", "metadata.txt"):
+            handle.writestr(f"tree_counter/{member}", b"[general]\n")
+        handle.writestr("tree_counter/foo.txt", b"one")
+        handle.writestr(name, b"two")
+
+    errors = validate_archive(archive)
+    assert any(
+        any(
+            token in error.lower()
+            for token in ("path", "segment", "collision", "duplicate")
+        )
+        for error in errors
+    )
+
+
+def test_validate_archive_reports_malformed_zip_without_raising(
+    tmp_path: Path,
+) -> None:
+    from scripts.check_publication import validate_archive
+
+    archive = tmp_path / "malformed.zip"
+    archive.write_bytes(b"not a zip archive")
+
+    errors = validate_archive(archive)
+    assert errors
+    assert any("archive" in error.lower() for error in errors)

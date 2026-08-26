@@ -28,10 +28,15 @@ except ModuleNotFoundError:  # Direct ``python3 scripts/package_plugin.py``.
 def _package_files(package: Path) -> list[Path]:
     files: list[Path] = []
     for path in package.rglob("*"):
+        if path.is_symlink():
+            raise ValueError(f"symlinks are not allowed: {path}")
         if not path.is_file():
             continue
         relative = path.relative_to(package)
-        if "__pycache__" in relative.parts or path.suffix == ".pyc":
+        if (
+            "__pycache__" in relative.parts
+            or path.suffix in {".pyc", ".pyo"}
+        ):
             continue
         files.append(path)
     return sorted(files, key=lambda path: path.relative_to(package).as_posix())
@@ -74,7 +79,7 @@ def build_package(repo_root: Path, output_path: Path) -> Path:
         for path, name in zip(files, names):
             info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
             info.create_system = 3
-            info.external_attr = 0o644 << 16
+            info.external_attr = (0o100000 | 0o644) << 16
             handle.writestr(info, path.read_bytes())
 
     archive_errors = validate_archive(destination)

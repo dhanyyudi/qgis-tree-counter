@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
+import stat
 import zipfile
 from pathlib import Path
 
@@ -109,3 +111,60 @@ def test_build_package_rejects_source_archive_over_20_mib(
 
     with pytest.raises(ValueError, match="20 MiB|20 MB|ceiling"):
         build_package(repo, tmp_path / "large.zip")
+
+
+@pytest.mark.parametrize("relative_path", [".pyc", ".pyo"])
+def test_build_package_excludes_python_cache_and_bytecode(
+    tmp_path: Path, relative_path: str
+) -> None:
+    from scripts.package_plugin import build_package
+
+    repo = tmp_path / "repo"
+    shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(".git"))
+    cache = repo / "tree_counter" / "__pycache__"
+    cache.mkdir(exist_ok=True)
+    (cache / f"cached{relative_path}").write_bytes(b"cache")
+
+    archive = build_package(repo, tmp_path / "cache.zip")
+    with zipfile.ZipFile(archive) as handle:
+        assert all(
+            "__pycache__" not in name and not name.endswith(relative_path)
+            for name in handle.namelist()
+        )
+
+
+@pytest.mark.parametrize("kind", ["root", "directory", "file", "broken"])
+def test_build_package_rejects_source_symlinks(
+    tmp_path: Path, kind: str
+) -> None:
+    from scripts.package_plugin import build_package
+
+    repo = tmp_path / "repo"
+    shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(".git"))
+    package = repo / "tree_counter"
+    if kind == "root":
+        shutil.rmtree(package)
+        os.symlink(repo / "README.md", package)
+    elif kind == "directory":
+        os.symlink(
+            repo / "docs", package / "linked-dir", target_is_directory=True
+        )
+    elif kind == "file":
+        os.symlink(repo / "README.md", package / "linked-file.md")
+    else:
+        os.symlink(repo / "missing-target", package / "broken-link")
+
+    with pytest.raises(ValueError, match="symlink"):
+        build_package(repo, tmp_path / "symlink.zip")
+
+
+def test_builder_marks_archive_members_as_regular_files(
+    tmp_path: Path,
+) -> None:
+    from scripts.package_plugin import build_package
+
+    archive = build_package(ROOT, tmp_path / "regular.zip")
+    with zipfile.ZipFile(archive) as handle:
+        for info in handle.infolist():
+            mode = (info.external_attr >> 16) & 0o170000
+            assert mode == stat.S_IFREG

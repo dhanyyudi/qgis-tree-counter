@@ -11,8 +11,10 @@ from __future__ import annotations
 import argparse
 import configparser
 import re
+import stat
 import sys
 import zipfile
+import zlib
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
@@ -30,6 +32,8 @@ FORBIDDEN_EXTENSIONS = {
     ".vrt",
     ".gpkg",
     ".whl",
+    ".pyc",
+    ".pyo",
     ".so",
     ".dylib",
     ".dll",
@@ -62,9 +66,13 @@ def _metadata_errors(values: configparser.SectionProxy) -> list[str]:
 
     for key in ("homepage", "repository", "tracker"):
         value = values.get(key, "").strip()
-        parsed = urlparse(value)
+        try:
+            parsed = urlparse(value)
+        except ValueError:
+            parsed = None
         if (
             not value
+            or parsed is None
             or parsed.scheme != "https"
             or not parsed.netloc
             or any(character.isspace() for character in value)
@@ -104,6 +112,9 @@ def _metadata_errors(values: configparser.SectionProxy) -> list[str]:
 
 
 def _forbidden_path_error(relative: str) -> str | None:
+    raw_parts = relative.split("/")
+    if any(part in {"", ".", ".."} for part in raw_parts):
+        return f"forbidden empty or non-canonical path segment: {relative}"
     path = PurePosixPath(relative)
     if path.is_absolute() or ".." in path.parts:
         return f"forbidden path traversal or absolute path: {relative}"
@@ -141,6 +152,8 @@ def validate_source(repo_root: Path) -> list[str]:
     root = Path(repo_root)
     package = root / PACKAGE_NAME
     errors: list[str] = []
+    if package.is_symlink():
+        return [f"package directory must not be a symlink: {PACKAGE_NAME}"]
     if not package.is_dir():
         return [f"missing package directory: {PACKAGE_NAME}"]
 
@@ -153,7 +166,9 @@ def validate_source(repo_root: Path) -> list[str]:
 
     root_license = root / "LICENSE"
     package_license = package / "LICENSE"
-    if root_license.is_file() and package_license.is_file():
+    if not root_license.is_file():
+        errors.append("missing repository-root LICENSE")
+    elif package_license.is_file():
         try:
             if root_license.read_bytes() != package_license.read_bytes():
                 errors.append("root LICENSE and packaged LICENSE differ")
@@ -180,15 +195,14 @@ def validate_source(repo_root: Path) -> list[str]:
                     f"dependency disclosure is missing: {dependency}"
                 )
 
+    seen_paths: dict[str, str] = {}
     for path in sorted(package.rglob("*")):
-        if not path.is_file():
-            continue
         relative_path = path.relative_to(package).as_posix()
         # Python bytecode and caches are local test artifacts and are never
         # considered for packaging; all other files must pass the policy.
         if (
             "__pycache__" in PurePosixPath(relative_path).parts
-            or path.suffix == ".pyc"
+            or path.suffix in {".pyc", ".pyo"}
         ):
             continue
         if path.is_symlink():
@@ -197,9 +211,20 @@ def validate_source(repo_root: Path) -> list[str]:
                 f"{relative_path}"
             )
             continue
+        if not path.is_file():
+            continue
         forbidden = _forbidden_path_error(relative_path)
         if forbidden:
             errors.append(forbidden)
+        canonical = "/".join(
+            part.casefold() for part in relative_path.split("/")
+        )
+        previous = seen_paths.setdefault(canonical, relative_path)
+        if previous != relative_path:
+            errors.append(
+                "case-folded package path collision: "
+                f"{previous} and {relative_path}"
+            )
 
     return errors
 
@@ -228,8 +253,23 @@ def validate_archive(archive_path: Path) -> list[str]:
                 errors.append("archive is empty")
 
             package_names: list[str] = []
+            seen_paths: dict[str, str] = {}
             for info in infos:
                 name = info.filename
+                if not name.endswith("/"):
+                    try:
+                        handle.read(name)
+                    except (
+                        EOFError,
+                        NotImplementedError,
+                        OSError,
+                        RuntimeError,
+                        zipfile.BadZipFile,
+                        zlib.error,
+                    ) as exc:
+                        errors.append(
+                            f"archive member cannot be read: {name}: {exc}"
+                        )
                 if not name.startswith(f"{PACKAGE_NAME}/"):
                     errors.append(
                         f"archive must have one {PACKAGE_NAME}/ root: {name}"
@@ -242,9 +282,28 @@ def validate_archive(archive_path: Path) -> list[str]:
                     )
                     continue
                 package_names.append(relative)
+                canonical = "/".join(
+                    part.casefold() for part in relative.split("/")
+                )
+                previous = seen_paths.setdefault(canonical, relative)
+                if previous != relative:
+                    errors.append(
+                        "canonical archive path collision: "
+                        f"{previous} and {relative}"
+                    )
                 forbidden = _forbidden_path_error(relative)
                 if forbidden:
                     errors.append(forbidden)
+                mode = (info.external_attr >> 16) & 0xFFFF
+                file_type = stat.S_IFMT(mode)
+                if file_type == stat.S_IFLNK:
+                    errors.append(
+                        f"archive symlink member is forbidden: {name}"
+                    )
+                elif file_type not in (0, stat.S_IFREG):
+                    errors.append(
+                        f"archive non-regular member is forbidden: {name}"
+                    )
                 if info.date_time != (1980, 1, 1, 0, 0, 0):
                     errors.append(
                         "archive member has a non-deterministic timestamp: "
