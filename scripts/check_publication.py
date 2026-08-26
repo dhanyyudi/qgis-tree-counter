@@ -254,11 +254,12 @@ def validate_archive(archive_path: Path) -> list[str]:
 
             package_names: list[str] = []
             seen_paths: dict[str, str] = {}
+            member_bytes: dict[str, bytes | None] = {}
             for info in infos:
                 name = info.filename
                 if not name.endswith("/"):
                     try:
-                        handle.read(name)
+                        member_bytes[name] = handle.read(name)
                     except (
                         EOFError,
                         NotImplementedError,
@@ -270,6 +271,7 @@ def validate_archive(archive_path: Path) -> list[str]:
                         errors.append(
                             f"archive member cannot be read: {name}: {exc}"
                         )
+                        member_bytes[name] = None
                 if not name.startswith(f"{PACKAGE_NAME}/"):
                     errors.append(
                         f"archive must have one {PACKAGE_NAME}/ root: {name}"
@@ -321,21 +323,21 @@ def validate_archive(archive_path: Path) -> list[str]:
 
             metadata_name = f"{PACKAGE_NAME}/metadata.txt"
             if metadata_name in names:
-                parser = configparser.ConfigParser(interpolation=None)
-                try:
-                    parser.read_string(
-                        handle.read(metadata_name).decode("utf-8")
-                    )
-                    if parser.has_section("general"):
-                        errors.extend(_metadata_errors(parser["general"]))
-                    else:
+                metadata_bytes = member_bytes.get(metadata_name)
+                if metadata_bytes is not None:
+                    parser = configparser.ConfigParser(interpolation=None)
+                    try:
+                        parser.read_string(metadata_bytes.decode("utf-8"))
+                        if parser.has_section("general"):
+                            errors.extend(_metadata_errors(parser["general"]))
+                        else:
+                            errors.append(
+                                "metadata is missing the [general] section"
+                            )
+                    except (UnicodeError, configparser.Error) as exc:
                         errors.append(
-                            "metadata is missing the [general] section"
+                            f"metadata cannot be read from archive: {exc}"
                         )
-                except (UnicodeError, configparser.Error) as exc:
-                    errors.append(
-                        f"metadata cannot be read from archive: {exc}"
-                    )
     except (OSError, zipfile.BadZipFile) as exc:
         errors.append(f"archive cannot be read: {exc}")
 

@@ -7,6 +7,8 @@ from __future__ import annotations
 import shutil
 import stat
 import struct
+import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -274,3 +276,92 @@ def test_validate_archive_reports_malformed_zip_without_raising(
     errors = validate_archive(archive)
     assert errors
     assert any("archive" in error.lower() for error in errors)
+
+
+def _rewrite_metadata_method(
+    source: Path, destination: Path, method: int
+) -> None:
+    data = bytearray(source.read_bytes())
+    with zipfile.ZipFile(source) as handle:
+        info = handle.getinfo("tree_counter/metadata.txt")
+        data[info.header_offset + 8:info.header_offset + 10] = struct.pack(
+            "<H", method
+        )
+    offset = 0
+    while True:
+        central = data.find(b"PK\x01\x02", offset)
+        assert central >= 0
+        name_length = struct.unpack_from("<H", data, central + 28)[0]
+        name = data[central + 46:central + 46 + name_length]
+        if name == b"tree_counter/metadata.txt":
+            data[central + 10:central + 12] = struct.pack("<H", method)
+            break
+        offset = central + 4
+    destination.write_bytes(data)
+
+
+def test_validate_archive_reports_metadata_unsupported_compression(
+    tmp_path: Path,
+) -> None:
+    from scripts.check_publication import validate_archive
+
+    source = _valid_archive(tmp_path)
+    unsupported = tmp_path / "metadata-unsupported.zip"
+    _rewrite_metadata_method(source, unsupported, 99)
+
+    errors = validate_archive(unsupported)
+    assert errors
+    assert any("metadata.txt" in error for error in errors)
+    assert not any("traceback" in error.lower() for error in errors)
+
+
+def test_validate_archive_reports_metadata_corruption_without_raising(
+    tmp_path: Path,
+) -> None:
+    from scripts.check_publication import validate_archive
+
+    source = _valid_archive(tmp_path)
+    corrupted = tmp_path / "metadata-corrupted.zip"
+    data = bytearray(source.read_bytes())
+    with zipfile.ZipFile(source) as handle:
+        info = handle.getinfo("tree_counter/metadata.txt")
+        payload_start = (
+            info.header_offset
+            + 30
+            + len(info.filename.encode())
+            + len(info.extra)
+        )
+        data[payload_start] ^= 0xFF
+    corrupted.write_bytes(data)
+
+    errors = validate_archive(corrupted)
+    assert errors
+    assert any("metadata.txt" in error for error in errors)
+    assert not any("traceback" in error.lower() for error in errors)
+
+
+def test_metadata_corruption_cli_exits_nonzero_without_traceback(
+    tmp_path: Path,
+) -> None:
+    source = _valid_archive(tmp_path)
+    corrupted = tmp_path / "metadata-cli-corrupted.zip"
+    data = bytearray(source.read_bytes())
+    with zipfile.ZipFile(source) as handle:
+        info = handle.getinfo("tree_counter/metadata.txt")
+        payload_start = (
+            info.header_offset
+            + 30
+            + len(info.filename.encode())
+            + len(info.extra)
+        )
+        data[payload_start] ^= 0xFF
+    corrupted.write_bytes(data)
+
+    result = subprocess.run(
+        [sys.executable, "scripts/check_publication.py", str(corrupted)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "Traceback" not in result.stderr
