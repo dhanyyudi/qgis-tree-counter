@@ -1,0 +1,19 @@
+[general]
+name=Tree Counter
+qgisMinimumVersion=3.44
+qgisMaximumVersion=4.99
+description=Count trees in georeferenced aerial imagery with user-provided YOLO models.
+about=Open-source QGIS plugin foundation for local tree counting in georeferenced aerial imagery. Under active development; not ready for production installation.
+version=0.1.0
+author=Dhany Yudi Prasetyo
+email=dhanyyudi.prasetyo@gmail.com
+homepage=https://github.com/dhanyyudi/qgis-tree-counter
+repository=https://github.com/dhanyyudi/qgis-tree-counter
+tracker=https://github.com/dhanyyudi/qgis-tree-counter/issues
+license=AGPL-3.0-only
+category=Raster
+experimental=True
+deprecated=False
+tags=tree counting,YOLO,aerial imagery,geospatial
+hasProcessingProvider=no
+server=False
