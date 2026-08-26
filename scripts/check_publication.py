@@ -29,6 +29,8 @@ PACKAGE_MANIFEST = (
     "compat.py",
     "constants.py",
     "core/__init__.py",
+    "core/geometry.py",
+    "core/tiling.py",
     "core/types.py",
     "core/validation.py",
     "errors.py",
