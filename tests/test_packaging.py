@@ -130,6 +130,24 @@ def test_build_package_rejects_any_file_outside_foundation_manifest(
         build_package(repo, tmp_path / "bad-manifest.zip")
 
 
+def test_build_package_rejects_maintainer_path_in_package_text(
+    tmp_path: Path,
+) -> None:
+    from scripts.package_plugin import build_package
+
+    repo = tmp_path / "repo"
+    shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(".git"))
+    package = repo / "tree_counter" / "constants.py"
+    package.write_text(
+        package.read_text(encoding="utf-8")
+        + "\nprivate path: /" + "Users/maintainer/private\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="maintainer|internal|forbidden"):
+        build_package(repo, tmp_path / "bad-content.zip")
+
+
 def test_build_package_rejects_source_archive_over_20_mib(
     tmp_path: Path,
 ) -> None:

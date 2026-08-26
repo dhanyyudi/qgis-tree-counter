@@ -21,10 +21,20 @@ from urllib.parse import urlparse
 
 MAX_ARCHIVE_BYTES = 20 * 1024 * 1024
 PACKAGE_NAME = "tree_counter"
-# This is intentionally strict while the repository contains only the inert
-# foundation shell. Feature plans must expand it explicitly when files become
-# part of the distributable plugin.
-PACKAGE_MANIFEST = ("LICENSE", "__init__.py", "metadata.txt", "plugin.py")
+# This inventory is intentionally explicit. Feature work must expand it in the
+# same change that adds a distributable package file.
+PACKAGE_MANIFEST = (
+    "LICENSE",
+    "__init__.py",
+    "compat.py",
+    "constants.py",
+    "core/__init__.py",
+    "core/types.py",
+    "core/validation.py",
+    "errors.py",
+    "metadata.txt",
+    "plugin.py",
+)
 MANDATORY_FILES = PACKAGE_MANIFEST
 EXPECTED_METADATA = {
     "name": "Tree Counter",
@@ -185,6 +195,25 @@ def _is_cache_path(relative: str) -> bool:
     )
 
 
+def _content_error(relative: str, data: bytes) -> str | None:
+    """Reject maintainer-only paths accidentally copied into source text."""
+
+    try:
+        text = data.decode("utf-8").casefold()
+    except UnicodeDecodeError:
+        return None
+    markers = (
+        "/" + "users/",
+        "agents" + ".md",
+        "docs/" + "internal",
+        "." + "superpowers",
+        "graphify-" + "out",
+    )
+    if any(marker in text for marker in markers):
+        return f"forbidden maintainer or internal path in file: {relative}"
+    return None
+
+
 def _manifest_error(relative: str) -> str | None:
     expected = {name.casefold() for name in PACKAGE_MANIFEST}
     if relative.casefold() not in expected or relative not in PACKAGE_MANIFEST:
@@ -280,6 +309,15 @@ def validate_source(repo_root: Path) -> list[str]:
         manifest_error = _manifest_error(relative_path)
         if manifest_error:
             errors.append(manifest_error)
+        try:
+            content_error = _content_error(relative_path, path.read_bytes())
+        except OSError as exc:
+            errors.append(
+                f"package file cannot be read: {relative_path}: {exc}"
+            )
+        else:
+            if content_error:
+                errors.append(content_error)
         canonical = "/".join(
             part.casefold() for part in relative_path.split("/")
         )
@@ -363,6 +401,11 @@ def validate_archive(archive_path: Path) -> list[str]:
                 manifest_error = _manifest_error(relative)
                 if manifest_error:
                     errors.append(manifest_error)
+                content = member_bytes.get(name)
+                if content is not None:
+                    content_error = _content_error(relative, content)
+                    if content_error:
+                        errors.append(content_error)
                 mode = (info.external_attr >> 16) & 0xFFFF
                 file_type = stat.S_IFMT(mode)
                 if file_type == stat.S_IFLNK:
