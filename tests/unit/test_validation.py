@@ -62,6 +62,13 @@ def test_validate_overlap_accepts_inclusive_bounds() -> None:
     assert validate_overlap_percent(50) == 50
 
 
+def test_validate_overlap_rejects_fractional_percentages() -> None:
+    from tree_counter.core.validation import validate_overlap_percent
+
+    with pytest.raises(ValueError):
+        validate_overlap_percent(12.5)
+
+
 def test_validate_inference_settings_rejects_invalid_nested_values() -> None:
     from tree_counter.core.types import InferenceSettings
 

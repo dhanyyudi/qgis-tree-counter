@@ -73,13 +73,16 @@ def validate_tile_size(value: int) -> int:
     return value
 
 
-def validate_overlap_percent(value: Number) -> float:
+def validate_overlap_percent(value: int) -> int:
     """Validate inclusive tile overlap as a percentage in [0, 50]."""
 
-    result = _finite(value, "overlap_percent")
-    if not MIN_OVERLAP_PERCENT <= result <= MAX_OVERLAP_PERCENT:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not MIN_OVERLAP_PERCENT <= value <= MAX_OVERLAP_PERCENT
+    ):
         raise ValidationError("overlap_percent must be between 0 and 50")
-    return result
+    return value
 
 
 def validate_pixel_coordinate(

@@ -291,10 +291,11 @@ def validate_source(repo_root: Path) -> list[str]:
     seen_paths: dict[str, str] = {}
     for path in sorted(package.rglob("*")):
         relative_path = path.relative_to(package).as_posix()
-        # Python bytecode and caches are local test artifacts and are never
-        # considered for packaging; all other files must pass the policy.
-        if _is_cache_path(relative_path):
-            continue
+        cache_path = _is_cache_path(relative_path)
+        if cache_path:
+            errors.append(
+                f"forbidden cache or bytecode path: {relative_path}"
+            )
         if path.is_symlink():
             errors.append(
                 "symlinks are not allowed in package files: "
