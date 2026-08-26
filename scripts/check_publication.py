@@ -60,9 +60,12 @@ PACKAGE_MANIFEST = (
     "worker/__init__.py",
     "worker/__main__.py",
     "worker/backend_base.py",
+    "worker/backend_onnx.py",
     "worker/capabilities.py",
+    "worker/image.py",
     "worker/model_info.py",
     "worker/runner.py",
+    "worker/yolo_postprocess.py",
 )
 MANDATORY_FILES = PACKAGE_MANIFEST
 EXPECTED_METADATA = {
