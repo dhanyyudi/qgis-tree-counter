@@ -32,12 +32,18 @@ PACKAGE_MANIFEST = (
     "core/dedup.py",
     "core/geometry.py",
     "core/nms.py",
+    "core/protocol.py",
     "core/tiling.py",
     "core/types.py",
     "core/validation.py",
     "errors.py",
     "metadata.txt",
     "plugin.py",
+    "runtime/__init__.py",
+    "runtime/worker_bootstrap.py",
+    "worker/__init__.py",
+    "worker/__main__.py",
+    "worker/runner.py",
 )
 MANDATORY_FILES = PACKAGE_MANIFEST
 EXPECTED_METADATA = {
