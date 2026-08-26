@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.dylib
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Build and release artifacts
+build/
+dist/
+*.egg-info/
+*.zip
+
+# Models, imagery, and generated geospatial data
+*.pt
+*.pth
+*.onnx
+*.tif
+*.tiff
+*.ecw
+*.gpkg
+*.vrt
+
+# IDE and operating system files
+.DS_Store
+.idea/
+.vscode/
+
+# Local agent context and internal planning — never commit
+AGENTS.md
+AGENTS.MD
+.agents/
+.plan/
+.superpowers/
+graphify-out/
+docs/internal/
+*.local.md
+
