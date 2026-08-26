@@ -59,6 +59,9 @@ PACKAGE_MANIFEST = (
     "settings/trust.py",
     "worker/__init__.py",
     "worker/__main__.py",
+    "worker/backend_base.py",
+    "worker/capabilities.py",
+    "worker/model_info.py",
     "worker/runner.py",
 )
 MANDATORY_FILES = PACKAGE_MANIFEST
