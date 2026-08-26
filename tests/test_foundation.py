@@ -1,5 +1,7 @@
 """Tests for the public Tree Counter plugin foundation."""
 
+# SPDX-License-Identifier: AGPL-3.0-only
+
 from __future__ import annotations
 
 import ast
@@ -9,6 +11,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "tree_counter"
+
+
+def test_class_factory_constructs_inert_shell_and_preserves_iface() -> None:
+    import tree_counter
+
+    from tree_counter.plugin import TreeCounterPlugin
+
+    sentinel_iface = object()
+    plugin = tree_counter.classFactory(sentinel_iface)
+
+    assert isinstance(plugin, TreeCounterPlugin)
+    assert plugin.iface is sentinel_iface
+    assert plugin.initGui() is None
+    assert plugin.unload() is None
 
 
 def test_metadata_uses_the_public_plugin_identity() -> None:
@@ -84,13 +100,20 @@ def test_class_factory_imports_plugin_lazily() -> None:
 def test_shell_is_inert_and_does_not_import_non_qgis_ui_dependencies() -> None:
     source = (PACKAGE / "plugin.py").read_text(encoding="utf-8")
     module = ast.parse(source)
-    imported_modules = {
-        node.module
-        for node in ast.walk(module)
-        if isinstance(node, ast.ImportFrom) and node.module
-    }
 
-    assert imported_modules <= {"qgis.PyQt"}
+    def is_allowed_qgis_pyqt(name: str | None) -> bool:
+        return bool(name) and (
+            name == "qgis.PyQt" or name.startswith("qgis.PyQt.")
+        )
+
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            assert all(
+                is_allowed_qgis_pyqt(alias.name) for alias in node.names
+            )
+        elif isinstance(node, ast.ImportFrom):
+            assert is_allowed_qgis_pyqt(node.module)
+
     assert "requests" not in source
     assert "urllib" not in source
     assert "subprocess" not in source

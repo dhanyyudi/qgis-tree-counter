@@ -8,7 +8,7 @@ This project is under active development and is not yet ready for production ins
 
 The plugin is designed to accept local YOLO `.pt` and `.onnx` detection models, read supported raster layers through QGIS, run inference locally in an isolated post-install runtime, and produce georeferenced GeoPackage outputs. Planned outputs include tree centers, detection boxes, and run provenance. Models and imagery will remain on the user's machine.
 
-The runtime will be installed and managed explicitly by the user. The plugin will not bundle model files, raster imagery, runtime binaries, or Python wheels, and it will not download models automatically.
+The runtime will be installed and managed explicitly by the user. The plugin will not bundle model files, raster imagery, runtime binaries, or Python wheels, and it will not download models automatically. It will not send models or raster imagery to remote services, and it will not collect telemetry or analytics or upload crash reports automatically. Network access will occur only after the user explicitly starts an action in Runtime Manager.
 
 ## Compatibility
 
