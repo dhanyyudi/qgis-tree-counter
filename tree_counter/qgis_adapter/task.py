@@ -20,6 +20,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Lock
 from typing import Any, Protocol, runtime_checkable
 
 from tree_counter.constants import PROTOCOL_VERSION
@@ -462,6 +463,8 @@ class CountingTask(QgsTask):
         self._output_request = output_request
         self._crs = crs
         self._cancelled = False
+        self._terminal_committed = False
+        self._cancel_lock = Lock()
         self._should_cancel = (
             should_cancel
             if should_cancel is not None
@@ -473,7 +476,9 @@ class CountingTask(QgsTask):
     def cancel(self) -> bool:
         """Request cancellation without touching the worker-thread process."""
 
-        self._cancelled = True
+        with self._cancel_lock:
+            if not self._terminal_committed:
+                self._cancelled = True
         super().cancel()
         return True
 
@@ -482,6 +487,7 @@ class CountingTask(QgsTask):
 
         self._started_at = self._now()
         keep_log = False
+        published: Path | None = None
         try:
             self._channel.start(self._program, list(self._arguments))
             run = CountingRun(
@@ -492,7 +498,9 @@ class CountingTask(QgsTask):
                 should_cancel=self._should_cancel,
             )
             result = run.execute(self._request)
+            self._guard_cancelled()
             published = self._publish(result)
+            self._guard_cancelled(published)
         except RunCancelled:
             self.terminal_event.emit({"type": "cancelled"})
             return False
@@ -515,6 +523,14 @@ class CountingTask(QgsTask):
         finally:
             self._channel.close()
             self._workspace.close(keep_log=keep_log)
+        try:
+            self._commit_completion(published)
+        except RunCancelled:
+            self.terminal_event.emit({"type": "cancelled"})
+            return False
+        except TreeCounterError as error:
+            self.terminal_event.emit({"type": "failed", "error": error})
+            return False
         self.terminal_event.emit(
             {
                 "type": "completed",
@@ -561,6 +577,39 @@ class CountingTask(QgsTask):
             summary,
             self._crs,
         )
+
+    def _guard_cancelled(self, published: Path | None = None) -> None:
+        """Remove this run's output and stop when cancellation won."""
+
+        with self._cancel_lock:
+            cancelled = self._cancelled
+        if not cancelled:
+            return
+        if published is not None:
+            self._remove_published(published)
+        raise RunCancelled()
+
+    def _commit_completion(self, published: Path | None) -> None:
+        """Atomically choose completed or cancelled as terminal state."""
+
+        with self._cancel_lock:
+            if not self._cancelled:
+                self._terminal_committed = True
+                return
+        if published is not None:
+            self._remove_published(published)
+        raise RunCancelled()
+
+    @staticmethod
+    def _remove_published(published: Path) -> None:
+        try:
+            published.unlink(missing_ok=True)
+        except OSError as error:
+            raise RunFailed(
+                ErrorCode.OUTPUT_FAILURE,
+                "a cancelled output could not be removed: "
+                f"{type(error).__name__}",
+            ) from error
 
     @staticmethod
     def _now() -> str:

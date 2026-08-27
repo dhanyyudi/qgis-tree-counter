@@ -272,6 +272,31 @@ def test_start_run_does_not_depend_on_a_cached_package_reexport(
     assert submitted == [task]
 
 
+def test_a_provider_preflight_exception_restores_the_controller(
+    qgis_application, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tree_counter.errors import ErrorCode
+    from tree_counter.plugin import TreeCounterPlugin
+
+    failures: list[object] = []
+
+    class FakeController:
+        on_failed = failures.append
+
+    plugin = TreeCounterPlugin(None)
+    plugin._controller = FakeController()
+    monkeypatch.setattr(
+        plugin,
+        "_build_task",
+        lambda _state: (_ for _ in ()).throw(OSError("provider vanished")),
+    )
+
+    plugin._start_run(object())
+
+    assert len(failures) == 1
+    assert failures[0].code is ErrorCode.INVALID_RASTER
+
+
 def test_the_dedicated_task_manager_adapter_is_packaged() -> None:
     """Task submission must remain importable after a package hot reload."""
 

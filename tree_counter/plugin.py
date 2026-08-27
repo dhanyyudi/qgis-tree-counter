@@ -410,6 +410,17 @@ class TreeCounterPlugin:
         except TreeCounterError as error:
             self._controller.on_failed(error)
             return
+        except Exception as error:
+            self._controller.on_failed(
+                TreeCounterError(
+                    ErrorCode.INVALID_RASTER,
+                    diagnostic_detail=(
+                        "counting preflight failed: "
+                        f"{type(error).__name__}: {error}"
+                    ),
+                )
+            )
+            return
         parent = self.iface.mainWindow() if self.iface is not None else None
         bridge = TaskEventBridge(parent)
         bridge.progress_event.connect(self._controller.on_event)

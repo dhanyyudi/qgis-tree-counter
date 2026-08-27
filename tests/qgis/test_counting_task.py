@@ -379,3 +379,23 @@ def test_an_interrupted_read_is_reported_as_a_cancellation(
 
     with pytest.raises(RunCancelled):
         run._await("run-1", "model_info", None)
+
+
+def test_cancel_during_publication_removes_output_and_wins_terminal_state(
+    qgis_application, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task, events = _task(
+        qgis_application, tmp_path, ScriptedTransport(_happy_replies())
+    )
+    published = tmp_path / "published.gpkg"
+
+    def publish(_result):
+        published.write_bytes(b"complete but cancelled")
+        task.cancel()
+        return published
+
+    monkeypatch.setattr(task, "_publish", publish)
+
+    assert task.run() is False
+    assert events == [{"type": "cancelled"}]
+    assert not published.exists()
