@@ -4,6 +4,10 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+from types import ModuleType
+
 import pytest
 
 
@@ -207,3 +211,59 @@ class _FakeSignal:
     def emit(self, payload: dict) -> None:
         for slot in list(self._slots):
             slot(payload)
+
+
+def test_start_run_does_not_depend_on_a_cached_package_reexport(
+    qgis_application, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plugin reload may retain the old qgis_adapter package object."""
+
+    import tree_counter.qgis_adapter as current_adapter
+    from tree_counter.plugin import TreeCounterPlugin
+
+    stale_adapter = ModuleType("tree_counter.qgis_adapter")
+    stale_adapter.__path__ = list(current_adapter.__path__)
+    monkeypatch.setitem(
+        sys.modules, "tree_counter.qgis_adapter", stale_adapter
+    )
+
+    submitted: list[object] = []
+    task_manager = ModuleType("tree_counter.qgis_adapter.task_manager")
+    task_manager.add_task = submitted.append
+    monkeypatch.setitem(
+        sys.modules,
+        "tree_counter.qgis_adapter.task_manager",
+        task_manager,
+    )
+
+    class FakeTask:
+        progress_event = _FakeSignal()
+        warning_event = _FakeSignal()
+        terminal_event = _FakeSignal()
+
+    class FakeController:
+        on_event = staticmethod(lambda event: None)
+        on_failed = staticmethod(lambda error: None)
+
+    plugin = TreeCounterPlugin(None)
+    plugin._controller = FakeController()
+    task = FakeTask()
+    monkeypatch.setattr(plugin, "_build_task", lambda state: task)
+
+    plugin._start_run(object())
+
+    assert submitted == [task]
+
+
+def test_the_dedicated_task_manager_adapter_is_packaged() -> None:
+    """Task submission must remain importable after a package hot reload."""
+
+    import tree_counter
+
+    adapter = (
+        Path(tree_counter.__file__).resolve().parent
+        / "qgis_adapter"
+        / "task_manager.py"
+    )
+
+    assert adapter.is_file()

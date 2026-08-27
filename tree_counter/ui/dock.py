@@ -298,6 +298,12 @@ def render(dock: Any, state: Any) -> None:
 
     model = state.model
     parts["model_path"].setText(model.filename if model else "")
+    if parts["output_path"].text() != state.output_path:
+        signals_were_blocked = parts["output_path"].blockSignals(True)
+        try:
+            parts["output_path"].setText(state.output_path)
+        finally:
+            parts["output_path"].blockSignals(signals_were_blocked)
     needs_confirmation = bool(
         model and model.needs_trust and not model.trusted
     )

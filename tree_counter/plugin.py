@@ -337,7 +337,7 @@ class TreeCounterPlugin:
     def _start_run(self, state: Any) -> None:
         """Build a counting task from the dock state and hand it to QGIS."""
 
-        from tree_counter.qgis_adapter import add_task
+        from tree_counter.qgis_adapter.task_manager import add_task
 
         try:
             task = self._build_task(state)

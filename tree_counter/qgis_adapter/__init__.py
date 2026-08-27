@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from tree_counter.qgis_adapter.task_manager import add_task
+
 
 def map_layers_named(name: str) -> list[Any]:
     """Return every loaded map layer with the given name."""
@@ -19,14 +21,6 @@ def map_layers_named(name: str) -> list[Any]:
     from qgis.core import QgsProject
 
     return QgsProject.instance().mapLayersByName(str(name))
-
-
-def add_task(task: Any) -> None:
-    """Hand a task to the QGIS task manager."""
-
-    from qgis.core import QgsApplication
-
-    QgsApplication.taskManager().addTask(task)
 
 
 __all__ = ["add_task", "map_layers_named"]

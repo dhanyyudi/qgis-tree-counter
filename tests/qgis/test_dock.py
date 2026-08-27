@@ -397,6 +397,29 @@ def test_the_output_browse_button_asks_the_host(qgis_application) -> None:
     assert chosen == [1]
 
 
+def test_the_output_browse_choice_is_shown_in_the_path_field(
+    qgis_application,
+) -> None:
+    """A host-selected directory must be visible, not only stored."""
+
+    from tree_counter.ui.dock import build_dock
+
+    controller = _controller()
+
+    def choose_output() -> None:
+        controller.set_output_path("/tmp/tree-counter-results")
+
+    dock = build_dock(controller, choose_output=choose_output)
+    try:
+        dock.tree_counter["output_browse"].click()
+
+        assert dock.tree_counter["output_path"].text() == (
+            "/tmp/tree-counter-results"
+        )
+    finally:
+        dock.setParent(None)
+
+
 def test_the_dock_explains_why_start_is_unavailable(qgis_application) -> None:
     """A grey Start button with no explanation is a dead end."""
 
