@@ -61,6 +61,7 @@ class FakeRunner:
                 0,
                 json.dumps(
                     {
+                        "python_version": "3.12.11",
                         "versions": self._versions,
                         "accelerators": ["cpu", "coreml"],
                     }
@@ -94,6 +95,8 @@ def _installer(tmp_path: Path, runner, **kwargs):
         paths=RuntimePaths(tmp_path / "runtime"),
         runner=runner,
         lock_root=lock_root,
+        platform_detector=lambda: "macos-arm64",
+        expected_root=tmp_path / "runtime",
         **kwargs,
     )
 
@@ -350,6 +353,141 @@ def test_inspect_reports_ready_after_install(tmp_path: Path) -> None:
     assert status.manifest is not None
 
 
+def test_inspect_reports_an_unsupported_current_platform_without_manifest(
+    tmp_path: Path,
+) -> None:
+    from tree_counter.runtime.installer import RuntimeInstaller
+    from tree_counter.runtime.paths import RuntimePaths, RuntimeState
+
+    installer = RuntimeInstaller(
+        paths=RuntimePaths(tmp_path / "runtime"),
+        runner=FakeRunner(),
+        lock_root=tmp_path / "locks",
+        platform_detector=lambda: "macos-x86_64",
+        expected_root=tmp_path / "runtime",
+    )
+
+    status = installer.inspect()
+
+    assert status.state is RuntimeState.INCOMPATIBLE
+    assert status.reasons
+
+
+def test_inspect_uses_the_current_platform_not_the_manifest_platform(
+    tmp_path: Path,
+) -> None:
+    from tree_counter.runtime.installer import RuntimeInstaller
+    from tree_counter.runtime.paths import RuntimePaths, RuntimeState
+
+    _installer(tmp_path, FakeRunner()).install(_plan())
+    installer = RuntimeInstaller(
+        paths=RuntimePaths(tmp_path / "runtime"),
+        runner=FakeRunner(),
+        lock_root=tmp_path / "locks",
+        platform_detector=lambda: "windows-x86_64",
+        expected_root=tmp_path / "runtime",
+    )
+
+    status = installer.inspect()
+
+    assert status.state is RuntimeState.INCOMPATIBLE
+    assert any("different platform" in reason for reason in status.reasons)
+
+
+def test_inspect_requires_a_live_runtime_self_check(tmp_path: Path) -> None:
+    from tree_counter.runtime.paths import RuntimeState
+
+    _installer(tmp_path, FakeRunner()).install(_plan())
+
+    broken = _installer(tmp_path, FakeRunner(failures=("--self-check",)))
+    status = broken.inspect()
+
+    assert status.state is RuntimeState.REPAIR_REQUIRED
+    assert any("could not import" in reason for reason in status.reasons)
+
+
+def test_inspect_detects_a_live_runtime_python_version_change(
+    tmp_path: Path,
+) -> None:
+    from tree_counter.runtime.paths import RuntimeState
+
+    _installer(tmp_path, FakeRunner()).install(_plan())
+    runner = FakeRunner()
+    original = runner
+
+    def changed_python(argv, timeout):
+        result = original(argv, timeout)
+        if "--self-check" in argv:
+            payload = json.loads(result.stdout)
+            payload["python_version"] = "3.12.10"
+            from tree_counter.runtime.installer import ProcessResult
+
+            return ProcessResult(0, json.dumps(payload), result.stderr)
+        return result
+
+    status = _installer(tmp_path, changed_python).inspect()
+
+    assert status.state is RuntimeState.INCOMPATIBLE
+    assert any("Python version changed" in reason for reason in status.reasons)
+
+
+def test_inspect_detects_live_package_version_drift(tmp_path: Path) -> None:
+    from tree_counter.runtime.paths import RuntimeState
+
+    _installer(tmp_path, FakeRunner()).install(_plan())
+    runner = FakeRunner()
+    original = runner
+
+    def changed_package(argv, timeout):
+        result = original(argv, timeout)
+        if "--self-check" in argv:
+            payload = json.loads(result.stdout)
+            payload["versions"]["onnxruntime"] = "9.9.9"
+            from tree_counter.runtime.installer import ProcessResult
+
+            return ProcessResult(0, json.dumps(payload), result.stderr)
+        return result
+
+    status = _installer(tmp_path, changed_package).inspect()
+
+    assert status.state is RuntimeState.REPAIR_REQUIRED
+    assert any("changed from" in reason for reason in status.reasons)
+
+
+def test_inspect_reports_update_when_a_lock_digest_changes(
+    tmp_path: Path,
+) -> None:
+    from tree_counter.runtime.paths import RuntimeState
+
+    installer = _installer(tmp_path, FakeRunner())
+    installer.install(_plan())
+    lock = tmp_path / "locks" / "macos-arm64" / "onnxruntime.txt"
+    lock.write_text(
+        "onnxruntime==1.0.1 --hash=sha256:" + "b" * 64 + "\n",
+        encoding="utf-8",
+    )
+
+    status = installer.inspect()
+
+    assert status.state is RuntimeState.UPDATE_AVAILABLE
+    assert any("update" in reason.lower() for reason in status.reasons)
+
+
+def test_inspect_fails_closed_when_the_current_lock_is_missing(
+    tmp_path: Path,
+) -> None:
+    from tree_counter.runtime.paths import RuntimeState
+
+    installer = _installer(tmp_path, FakeRunner())
+    installer.install(_plan())
+    (tmp_path / "locks" / "macos-arm64" / "onnxruntime.txt").unlink()
+
+    status = installer.inspect()
+
+    assert status.state is RuntimeState.REPAIR_REQUIRED
+    assert any("lock" in reason.lower() for reason in status.reasons)
+
+
 def test_inspect_reports_repair_when_the_venv_is_gone(
     tmp_path: Path,
 ) -> None:
@@ -397,6 +535,156 @@ def test_remove_deletes_only_the_runtime_root(tmp_path: Path) -> None:
 
 def test_remove_is_safe_when_nothing_is_installed(tmp_path: Path) -> None:
     _installer(tmp_path, FakeRunner()).remove()
+
+
+def test_remove_refuses_an_unowned_runtime_directory(tmp_path: Path) -> None:
+    from tree_counter.runtime.installer import RuntimeInstaller
+    from tree_counter.runtime.paths import RuntimeLocationError, RuntimePaths
+
+    unrelated = tmp_path / "unrelated-project"
+    unrelated.mkdir()
+    protected = unrelated / "do-not-delete.txt"
+    protected.write_text("keep", encoding="utf-8")
+    installer = RuntimeInstaller(
+        paths=RuntimePaths(unrelated),
+        runner=FakeRunner(),
+        lock_root=tmp_path / "locks",
+    )
+
+    with pytest.raises(RuntimeLocationError):
+        installer.remove()
+
+    assert protected.read_text(encoding="utf-8") == "keep"
+
+
+def test_forged_marker_at_an_unrelated_root_cannot_be_used_or_removed(
+    tmp_path: Path,
+) -> None:
+    from tree_counter.runtime.installer import (
+        OWNERSHIP_MARKER,
+        RuntimeInstaller,
+    )
+    from tree_counter.runtime.paths import RuntimeLocationError, RuntimePaths
+
+    unrelated = tmp_path / "unrelated-project"
+    unrelated.mkdir()
+    (unrelated / "runtime_owner.json").write_text(
+        json.dumps(OWNERSHIP_MARKER), encoding="utf-8"
+    )
+    protected = unrelated / "do-not-delete.txt"
+    protected.write_text("keep", encoding="utf-8")
+    installer = RuntimeInstaller(
+        paths=RuntimePaths(unrelated),
+        runner=FakeRunner(),
+        lock_root=tmp_path / "locks",
+        expected_root=tmp_path / "managed-runtime",
+    )
+
+    with pytest.raises(RuntimeLocationError):
+        installer.inspect()
+    with pytest.raises(RuntimeLocationError):
+        installer.remove()
+
+    assert protected.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.parametrize("operation", ["install", "update"])
+def test_transaction_refuses_unowned_existing_staging(
+    tmp_path: Path, operation: str
+) -> None:
+    from tree_counter.runtime.paths import RuntimeLocationError
+
+    root = tmp_path / "runtime"
+    staging = root / "staging"
+    staging.mkdir(parents=True)
+    protected = staging / "do-not-delete.txt"
+    protected.write_text("keep", encoding="utf-8")
+    installer = _installer(tmp_path, FakeRunner())
+
+    with pytest.raises(RuntimeLocationError):
+        getattr(installer, operation)(_plan())
+
+    assert protected.read_text(encoding="utf-8") == "keep"
+
+
+def test_remove_refuses_owned_root_with_unknown_child(tmp_path: Path) -> None:
+    from tree_counter.runtime.paths import RuntimeLocationError
+
+    installer = _installer(tmp_path, FakeRunner())
+    installer.install(_plan())
+    protected = tmp_path / "runtime" / "unexpected.txt"
+    protected.write_text("keep", encoding="utf-8")
+
+    with pytest.raises(RuntimeLocationError):
+        installer.remove()
+
+    assert protected.exists()
+
+
+def test_update_fails_closed_on_stale_previous_without_journal(
+    tmp_path: Path,
+) -> None:
+    from tree_counter.runtime.installer import InstallError
+
+    installer = _installer(tmp_path, FakeRunner())
+    installer.install(_plan())
+    previous = tmp_path / "runtime" / "previous"
+    previous.mkdir()
+
+    with pytest.raises(InstallError):
+        installer.update(_plan())
+
+    assert (
+        tmp_path / "runtime" / "active" / "runtime_manifest.json"
+    ).is_file()
+    assert previous.is_dir()
+
+
+def test_active_rename_error_is_reported_as_install_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tree_counter.runtime.installer import InstallError
+
+    installer = _installer(tmp_path, FakeRunner())
+    installer.install(_plan())
+    root = tmp_path / "runtime"
+    original_replace = Path.replace
+
+    def fail_active(source: Path, target: Path):
+        if source == root / "active":
+            raise OSError("simulated rename failure")
+        return original_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", fail_active)
+
+    with pytest.raises(InstallError):
+        installer.update(_plan())
+
+    assert (root / "active" / "runtime_manifest.json").is_file()
+    assert not (root / "activation_journal.json").exists()
+
+
+def test_inspect_recovers_a_swap_interrupted_after_active_move(
+    tmp_path: Path,
+) -> None:
+    from tree_counter.runtime.installer import ACTIVATION_JOURNAL_NAME
+    from tree_counter.runtime.paths import RuntimeState
+
+    installer = _installer(tmp_path, FakeRunner())
+    installer.install(_plan())
+    root = tmp_path / "runtime"
+    (root / "active").replace(root / "previous")
+    (root / ACTIVATION_JOURNAL_NAME).write_text(
+        json.dumps({"schema_version": 1, "had_active": True}),
+        encoding="utf-8",
+    )
+
+    status = installer.inspect()
+
+    assert status.state is RuntimeState.READY
+    assert (root / "active" / "runtime_manifest.json").is_file()
+    assert not (root / "previous").exists()
+    assert not (root / ACTIVATION_JOURNAL_NAME).exists()
 
 
 @pytest.mark.parametrize("unsafe", ["/", "/usr", "/etc"])

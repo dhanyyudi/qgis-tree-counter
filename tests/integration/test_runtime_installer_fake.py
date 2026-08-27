@@ -48,6 +48,7 @@ class ScriptedRuntime:
             0,
             json.dumps(
                 {
+                    "python_version": "3.12.11",
                     "versions": {
                         "numpy": "2.3.4",
                         "onnxruntime": "1.29.0",
@@ -81,6 +82,8 @@ def _installer(workspace: Path, runner):
         runner=runner,
         lock_root=workspace / "locks",
         home=workspace / "home",
+        platform_detector=lambda: "macos-arm64",
+        expected_root=workspace / "runtime",
     )
 
 
@@ -173,6 +176,40 @@ def test_a_failed_update_rolls_back_to_the_working_runtime(
     assert not (workspace / "runtime" / "staging").exists()
     assert not (workspace / "runtime" / "previous").exists()
     assert good.inspect().state is RuntimeState.READY
+
+
+def test_update_recovers_an_interrupted_activation_before_replacing_runtime(
+    workspace: Path,
+) -> None:
+    import json
+
+    from tree_counter.runtime.installer import ACTIVATION_JOURNAL_NAME
+    from tree_counter.runtime.paths import RuntimeState
+
+    initial_runner = ScriptedRuntime()
+    installer = _installer(workspace, initial_runner)
+    installer.install(_plan())
+    root = workspace / "runtime"
+    (root / "active").replace(root / "previous")
+    (root / ACTIVATION_JOURNAL_NAME).write_text(
+        json.dumps({"schema_version": 1, "had_active": True}),
+        encoding="utf-8",
+    )
+
+    replacing_runner = ScriptedRuntime()
+
+    def run_replacement(argv, timeout):
+        if "venv" in argv:
+            assert (root / "active").is_dir()
+        return replacing_runner(argv, timeout)
+
+    installer = _installer(workspace, run_replacement)
+    installer.update(_plan())
+
+    assert installer.inspect().state is RuntimeState.READY
+    assert (root / "active" / "runtime_manifest.json").is_file()
+    assert not (root / "previous").exists()
+    assert not (root / ACTIVATION_JOURNAL_NAME).exists()
 
 
 def test_a_failed_first_install_leaves_nothing_active(

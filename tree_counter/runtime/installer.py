@@ -13,6 +13,7 @@ use a deterministic fake.
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import shutil
 from collections.abc import Callable, Mapping, Sequence
@@ -21,7 +22,12 @@ from pathlib import Path
 from typing import NamedTuple
 
 from tree_counter.errors import ErrorCode, TreeCounterError
-from tree_counter.runtime.catalog import Catalog, CatalogError, load_catalog
+from tree_counter.runtime.catalog import (
+    Catalog,
+    CatalogError,
+    load_catalog,
+    platform_key,
+)
 from tree_counter.runtime.manifest import (
     MANIFEST_SCHEMA_VERSION,
     ManifestError,
@@ -31,12 +37,25 @@ from tree_counter.runtime.manifest import (
     parse_manifest,
 )
 from tree_counter.runtime.paths import (
+    ACTIVATION_JOURNAL_FILE_NAME,
+    ACTIVE_DIRECTORY_NAME,
+    LOGS_DIRECTORY_NAME,
+    OWNERSHIP_MARKER_FILE_NAME,
+    STAGING_DIRECTORY_NAME,
     RuntimePaths,
+    RuntimeLocationError,
     RuntimeState,
     assert_safe_runtime_root,
+    default_runtime_root,
 )
 
 PREVIOUS_DIRECTORY_NAME = "previous"
+ACTIVATION_JOURNAL_NAME = ACTIVATION_JOURNAL_FILE_NAME
+OWNERSHIP_MARKER = {
+    "format": 1,
+    "owner": "qgis-tree-counter",
+    "runtime_directory": "runtime",
+}
 PROCESS_TIMEOUT_SECONDS = 3600.0
 VENV_TIMEOUT_SECONDS = 300.0
 
@@ -70,7 +89,8 @@ SELF_CHECK_SOURCE = (
     "except Exception:\n"
     "    pass\n"
     "\n"
-    "print(json.dumps({'versions':versions,'accelerators':accelerators}))"
+    "print(json.dumps({'python_version':'.'.join(str(item) for item in "
+    "sys.version_info[:3]),'versions':versions,'accelerators':accelerators}))"
 )
 
 _SECRET_PATTERNS = (
@@ -106,6 +126,7 @@ class ProcessResult(NamedTuple):
 Runner = Callable[[Sequence[str], float], ProcessResult]
 Progress = Callable[[str, int], None]
 ShouldCancel = Callable[[], bool]
+PlatformDetector = Callable[[], str]
 
 
 @dataclass(frozen=True)
@@ -179,12 +200,22 @@ class RuntimeInstaller:
         catalog: Catalog | None = None,
         home: Path | None = None,
         clock: Callable[[], float] | None = None,
+        platform_detector: PlatformDetector | None = None,
+        expected_root: Path | str | None = None,
     ) -> None:
         self._paths = paths
         self._runner = runner
         self._lock_root = Path(lock_root)
         self._catalog = load_catalog() if catalog is None else catalog
         self._home = home
+        self._expected_root = (
+            default_runtime_root(home=home)
+            if expected_root is None
+            else Path(expected_root)
+        ).resolve()
+        self._platform_detector = (
+            platform_key if platform_detector is None else platform_detector
+        )
         if clock is None:
             import time
 
@@ -195,34 +226,132 @@ class RuntimeInstaller:
     # -- public lifecycle ------------------------------------------------
 
     def inspect(self) -> RuntimeStatus:
-        """Return the current runtime state without changing anything."""
+        """Return state, recovering an interrupted activation if needed."""
 
+        self._assert_expected_root()
+        try:
+            current_platform = self._platform_detector()
+        except CatalogError as exc:
+            return RuntimeStatus(
+                RuntimeState.INCOMPATIBLE,
+                (str(exc.diagnostic_detail or exc),),
+            )
+        if not any(
+            profile.platform == current_platform
+            for component in self._catalog.components.values()
+            for profile in component.profiles
+        ):
+            return RuntimeStatus(
+                RuntimeState.INCOMPATIBLE,
+                (
+                    "No runtime component is available for the current "
+                    f"platform: {current_platform}.",
+                ),
+            )
+        if self._paths.root.exists():
+            try:
+                self._assert_owned_root(self._paths.root)
+            except RuntimeLocationError:
+                return RuntimeStatus(
+                    RuntimeState.REPAIR_REQUIRED,
+                    ("The runtime directory is not owned by Tree Counter.",),
+                )
+        self._recover_activation()
+        if self._paths.activation_journal.exists():
+            return RuntimeStatus(
+                RuntimeState.REPAIR_REQUIRED,
+                (
+                    "A previous runtime activation could not be recovered; "
+                    "repair is required.",
+                ),
+            )
+        root = self._paths.root
         try:
             manifest = load_manifest(self._paths.manifest)
         except ManifestError:
-            return RuntimeStatus(RuntimeState.NOT_INSTALLED)
+            if not root.exists() or not self._has_runtime_artifacts():
+                return RuntimeStatus(RuntimeState.NOT_INSTALLED)
+            reasons = (
+                "The runtime manifest is missing or invalid; repair is "
+                "required.",
+            )
+            return RuntimeStatus(RuntimeState.REPAIR_REQUIRED, reasons)
         present = self._present_files()
-        imports = {
-            module: bool(present)
-            for name in manifest.components
-            if name in self._catalog.components
-            for module in self._catalog.components[name].imports
-        }
+        imports: dict[str, bool] = {}
+        live_versions: Mapping[str, object] = {}
         accelerators: set[str] = set()
-        for record in manifest.components.values():
-            accelerators.update(record.accelerators)
+        live_python_version: str | None = None
+        probe_error: str | None = None
+        if present:
+            try:
+                modules = self._modules_for(tuple(manifest.components))
+                probe = self._self_check(self._paths.active, modules)
+                versions = probe.get("versions")
+                if isinstance(versions, Mapping):
+                    live_versions = versions
+                    imports = {
+                        module: module in versions for module in modules
+                    }
+                live_version = probe.get("python_version")
+                if isinstance(live_version, str) and live_version:
+                    live_python_version = live_version
+                reported_accelerators = probe.get("accelerators", ())
+                is_accelerator_list = isinstance(
+                    reported_accelerators, Sequence
+                ) and not isinstance(reported_accelerators, (str, bytes))
+                if is_accelerator_list:
+                    accelerators.update(
+                        item
+                        for item in reported_accelerators
+                        if isinstance(item, str)
+                    )
+                if live_python_version is None:
+                    probe_error = (
+                        "The runtime self-check did not report its Python "
+                        "version."
+                    )
+            except TreeCounterError as exc:
+                probe_error = str(exc.diagnostic_detail or exc)
+        else:
+            probe_error = "The active runtime Python executable is missing."
+        if not imports:
+            imports = {
+                module: False
+                for name in manifest.components
+                if name in self._catalog.components
+                for module in self._catalog.components[name].imports
+            }
+        expected_locks, lock_errors = self._current_lock_digests(
+            manifest, current_platform
+        )
         report = evaluate_runtime(
             manifest=manifest,
             catalog=self._catalog,
-            platform=manifest.platform,
-            python_version=manifest.python_version,
+            platform=current_platform,
+            python_version=live_python_version or manifest.python_version,
             present_files=present,
             import_results=imports,
             available_accelerators=tuple(sorted(accelerators)),
+            expected_lock_digests=expected_locks or None,
         )
+        reasons = list(report.reasons)
+        version_drift = self._version_drift(manifest, live_versions)
+        if report.state is RuntimeState.INCOMPATIBLE:
+            report_state = report.state
+        elif version_drift:
+            report_state = RuntimeState.REPAIR_REQUIRED
+            reasons.extend(version_drift)
+        elif lock_errors:
+            report_state = RuntimeState.REPAIR_REQUIRED
+            reasons.extend(lock_errors)
+        elif probe_error:
+            report_state = RuntimeState.REPAIR_REQUIRED
+            reasons.append(probe_error)
+        else:
+            report_state = report.state
         return RuntimeStatus(
-            state=report.state,
-            reasons=report.reasons,
+            state=report_state,
+            reasons=tuple(reasons),
             manifest=manifest,
             accelerators=tuple(sorted(accelerators)),
         )
@@ -260,6 +389,7 @@ class RuntimeInstaller:
     def verify(self) -> RuntimeManifest:
         """Re-run the self-checks against the active runtime."""
 
+        self._assert_expected_root()
         try:
             manifest = load_manifest(self._paths.manifest)
         except ManifestError as exc:
@@ -271,10 +401,36 @@ class RuntimeInstaller:
     def remove(self) -> None:
         """Delete the runtime root, after proving it is safe to delete."""
 
+        self._assert_expected_root()
         root = assert_safe_runtime_root(self._paths.root, home=self._home)
         if not root.exists():
             return
-        shutil.rmtree(root)
+        self._assert_owned_root(root)
+        allowed = {
+            ACTIVE_DIRECTORY_NAME,
+            STAGING_DIRECTORY_NAME,
+            PREVIOUS_DIRECTORY_NAME,
+            LOGS_DIRECTORY_NAME,
+            OWNERSHIP_MARKER_FILE_NAME,
+            ACTIVATION_JOURNAL_FILE_NAME,
+        }
+        unknown = [
+            item.name for item in root.iterdir() if item.name not in allowed
+        ]
+        if unknown:
+            raise RuntimeLocationError(
+                "the runtime root contains unexpected files: "
+                + ", ".join(sorted(unknown))
+            )
+        for name in allowed - {OWNERSHIP_MARKER_FILE_NAME}:
+            self._clear(root / name)
+        self._clear(self._paths.ownership_marker)
+        try:
+            root.rmdir()
+        except OSError as exc:
+            raise RuntimeLocationError(
+                f"the owned runtime root could not be removed: {exc}"
+            ) from exc
 
     # -- transaction -----------------------------------------------------
 
@@ -285,11 +441,19 @@ class RuntimeInstaller:
         should_cancel: ShouldCancel,
         operation: str,
     ) -> RuntimeManifest:
+        self._assert_expected_root()
         root = assert_safe_runtime_root(self._paths.root, home=self._home)
         self._log = [f"{operation} started"]
         locks = self._resolve_locks(plan)
         self._check_python(plan)
 
+        self._prepare_owned_root(root)
+        self._recover_activation()
+        if self._paths.activation_journal.exists():
+            raise InstallError(
+                "a previous runtime activation could not be recovered; "
+                "repair is required"
+            )
         staging = self._paths.staging
         self._clear(staging)
         total_steps = len(plan.components) + 3
@@ -446,20 +610,74 @@ class RuntimeInstaller:
     def _activate(self, staging: Path) -> None:
         active = self._paths.active
         previous = self._paths.root / PREVIOUS_DIRECTORY_NAME
-        self._clear(previous)
+        journal = self._paths.activation_journal
+        if previous.exists() and not journal.exists():
+            raise InstallError(
+                "a stale previous runtime exists without a recovery journal"
+            )
+        self._atomic_write_json(
+            journal,
+            {"schema_version": 1, "had_active": active.exists()},
+        )
         moved = False
-        if active.exists():
-            active.replace(previous)
-            moved = True
         try:
+            if active.exists():
+                active.replace(previous)
+                moved = True
             staging.replace(active)
         except OSError as exc:
             if moved:
-                previous.replace(active)
+                try:
+                    previous.replace(active)
+                except OSError:
+                    # Keep the journal so a later inspect can recover.
+                    raise InstallError(
+                        "the runtime activation failed and rollback also "
+                        "failed"
+                    ) from exc
+            self._clear(journal)
             raise InstallError(
                 f"the runtime could not be activated: {exc}"
             ) from exc
         self._clear(previous)
+        self._clear(journal)
+
+    def _recover_activation(self) -> None:
+        """Recover a swap interrupted between the two directory renames."""
+
+        journal = self._paths.activation_journal
+        if not journal.is_file():
+            return
+        try:
+            self._assert_owned_root(self._paths.root)
+        except RuntimeLocationError:
+            return
+        try:
+            document = json.loads(journal.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(document, Mapping) or document.get(
+            "schema_version"
+        ) != 1:
+            return
+        active = self._paths.active
+        previous = self._paths.root / PREVIOUS_DIRECTORY_NAME
+        staging = self._paths.staging
+        try:
+            if not active.exists():
+                if (
+                    staging.exists()
+                    and (staging / self._paths.manifest.name).is_file()
+                ):
+                    staging.replace(active)
+                elif previous.exists():
+                    previous.replace(active)
+            if active.exists():
+                self._clear(previous)
+                self._clear(journal)
+        except OSError:
+            # Leave the journal for the next inspect/repair attempt.
+            return
 
     # -- helpers ---------------------------------------------------------
 
@@ -490,6 +708,103 @@ class RuntimeInstaller:
             for path in candidates
             if path.exists()
         )
+
+    def _has_runtime_artifacts(self) -> bool:
+        return any(
+            path.exists()
+            for path in (
+                self._paths.active,
+                self._paths.staging,
+                self._paths.root / PREVIOUS_DIRECTORY_NAME,
+            )
+        )
+
+    def _current_lock_digests(
+        self, manifest: RuntimeManifest, platform: str
+    ) -> tuple[dict[str, str], tuple[str, ...]]:
+        digests: dict[str, str] = {}
+        errors: list[str] = []
+        for component in manifest.components:
+            try:
+                profile = self._catalog.profile_for(component, platform)
+            except CatalogError as exc:
+                errors.append(str(exc.diagnostic_detail or exc))
+                continue
+            if profile is None:
+                errors.append(
+                    f"No lock profile is available for {component} on "
+                    f"{platform}."
+                )
+                continue
+            lock = self._lock_root / profile.lock
+            try:
+                if not lock.is_file():
+                    raise OSError("file does not exist")
+                digests[component] = hashlib.sha256(
+                    lock.read_bytes()
+                ).hexdigest()
+            except OSError as exc:
+                errors.append(
+                    f"The runtime lock for {component} is unavailable: {exc}."
+                )
+        return digests, tuple(errors)
+
+    @staticmethod
+    def _version_drift(
+        manifest: RuntimeManifest, live_versions: Mapping[str, object]
+    ) -> tuple[str, ...]:
+        drift: list[str] = []
+        for component, record in manifest.components.items():
+            for module, expected in record.versions.items():
+                observed = live_versions.get(module)
+                if observed is not None and str(observed) != expected:
+                    drift.append(
+                        f"The installed version of {module} changed from "
+                        f"{expected} to {observed}."
+                    )
+        return tuple(drift)
+
+    def _prepare_owned_root(self, root: Path) -> None:
+        existed = root.exists()
+        root.mkdir(parents=True, exist_ok=True)
+        marker = self._paths.ownership_marker
+        if marker.exists():
+            self._assert_owned_root(root)
+            return
+        if existed and any(root.iterdir()):
+            raise RuntimeLocationError(
+                "the runtime root is not owned by Tree Counter"
+            )
+        self._atomic_write_json(marker, OWNERSHIP_MARKER)
+
+    def _assert_expected_root(self) -> None:
+        actual = self._paths.root.resolve()
+        if actual != self._expected_root:
+            raise RuntimeLocationError(
+                "the runtime root does not match the managed Tree Counter "
+                "runtime location"
+            )
+
+    def _assert_owned_root(self, root: Path) -> None:
+        marker = root / OWNERSHIP_MARKER_FILE_NAME
+        try:
+            document = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise RuntimeLocationError(
+                "the runtime root is not owned by Tree Counter"
+            ) from exc
+        if document != OWNERSHIP_MARKER:
+            raise RuntimeLocationError(
+                "the runtime root is not owned by Tree Counter"
+            )
+
+    @staticmethod
+    def _atomic_write_json(path: Path, document: Mapping[str, object]) -> None:
+        temporary = path.with_name(path.name + ".tmp")
+        temporary.write_text(
+            json.dumps(document, sort_keys=True), encoding="utf-8"
+        )
+        temporary.replace(path)
 
     @staticmethod
     def _percent(step: int, total: int) -> int:

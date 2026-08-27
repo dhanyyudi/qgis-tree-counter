@@ -23,6 +23,8 @@ STAGING_DIRECTORY_NAME = "staging"
 ACTIVE_DIRECTORY_NAME = "active"
 LOGS_DIRECTORY_NAME = "logs"
 MANIFEST_FILE_NAME = "runtime_manifest.json"
+OWNERSHIP_MARKER_FILE_NAME = "runtime_owner.json"
+ACTIVATION_JOURNAL_FILE_NAME = "activation_journal.json"
 
 # Roots that are never acceptable even when the caller asks for them.
 _FORBIDDEN_ROOT_NAMES = (
@@ -186,6 +188,18 @@ class RuntimePaths:
 
         return self.active / MANIFEST_FILE_NAME
 
+    @property
+    def ownership_marker(self) -> Path:
+        """Return the marker proving that this root belongs to Tree Counter."""
+
+        return self._root / OWNERSHIP_MARKER_FILE_NAME
+
+    @property
+    def activation_journal(self) -> Path:
+        """Return the journal used to recover an interrupted activation."""
+
+        return self._root / ACTIVATION_JOURNAL_FILE_NAME
+
     def install_for(self, revision: str) -> Path:
         """Return the directory for one specific runtime revision."""
 
@@ -197,9 +211,11 @@ class RuntimePaths:
 
 __all__ = [
     "ACTIVE_DIRECTORY_NAME",
+    "ACTIVATION_JOURNAL_FILE_NAME",
     "APPLICATION_DIRECTORY_NAME",
     "LOGS_DIRECTORY_NAME",
     "MANIFEST_FILE_NAME",
+    "OWNERSHIP_MARKER_FILE_NAME",
     "RUNTIME_DIRECTORY_NAME",
     "STAGING_DIRECTORY_NAME",
     "RuntimeLocationError",
