@@ -65,6 +65,8 @@ PACKAGE_MANIFEST = (
     "settings/presets.py",
     "settings/store.py",
     "settings/trust.py",
+    "ui/__init__.py",
+    "ui/controller.py",
     "worker/__init__.py",
     "worker/__main__.py",
     "worker/backend_base.py",
