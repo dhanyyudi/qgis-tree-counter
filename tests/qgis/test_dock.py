@@ -380,3 +380,31 @@ def test_the_dock_lists_the_offered_layers(qgis_application) -> None:
         ] == ["blocks"]
     finally:
         dock.setParent(None)
+
+
+def test_the_output_browse_button_asks_the_host(qgis_application) -> None:
+    """Output had no picker at all; the path had to be typed by hand."""
+
+    from tree_counter.ui.dock import build_dock
+
+    chosen: list[int] = []
+    dock = build_dock(_controller(), choose_output=lambda: chosen.append(1))
+    try:
+        dock.tree_counter["output_browse"].click()
+    finally:
+        dock.setParent(None)
+
+    assert chosen == [1]
+
+
+def test_the_dock_explains_why_start_is_unavailable(qgis_application) -> None:
+    """A grey Start button with no explanation is a dead end."""
+
+    from tree_counter.ui.controller import BLOCKING_REASONS
+    from tree_counter.ui.dock import build_dock
+
+    dock = build_dock(_controller())
+    try:
+        assert BLOCKING_REASONS["raster"] in dock.tree_counter["status"].text()
+    finally:
+        dock.setParent(None)

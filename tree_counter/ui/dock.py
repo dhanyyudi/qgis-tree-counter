@@ -65,6 +65,7 @@ def build_dock(
     parent: Any = None,
     open_runtime_manager: Any = None,
     choose_model: Any = None,
+    choose_output: Any = None,
 ) -> Any:
     """Return the Tree Counter dock bound to *controller*."""
 
@@ -142,10 +143,12 @@ def build_dock(
     output = CollapsibleSection(tr(SECTION_TITLES[3]), expanded=True)
     output_path = QtWidgets.QLineEdit()
     output_path.setPlaceholderText(tr("Where results are written"))
+    output_browse = QtWidgets.QPushButton(tr("Browse..."))
     write_centers = QtWidgets.QCheckBox(tr("Tree centres"))
     write_centers.setChecked(True)
     write_boxes = QtWidgets.QCheckBox(tr("Detection boxes"))
     output.add_row(tr("Output"), output_path)
+    output.add_widget(output_browse)
     output.add_widget(write_centers)
     output.add_widget(write_boxes)
     outer.addWidget(output.widget)
@@ -191,6 +194,7 @@ def build_dock(
         "device": device,
         "advanced": advanced,
         "output_path": output_path,
+        "output_browse": output_browse,
         "write_centers": write_centers,
         "write_boxes": write_boxes,
         "primary": primary,
@@ -200,7 +204,9 @@ def build_dock(
         "sections": (data, model, detection, output, run),
     }
 
-    _wire(dock, controller, open_runtime_manager, choose_model)
+    _wire(
+        dock, controller, open_runtime_manager, choose_model, choose_output
+    )
     controller.subscribe(lambda state: render(dock, state))
     return dock
 
@@ -210,6 +216,7 @@ def _wire(
     controller: CountingController,
     open_runtime: Any,
     choose_model: Any = None,
+    choose_output: Any = None,
 ) -> None:
     parts = dock.tree_counter
 
@@ -252,6 +259,10 @@ def _wire(
 
     if choose_model is not None:
         parts["browse"].clicked.connect(lambda _checked=False: choose_model())
+    if choose_output is not None:
+        parts["output_browse"].clicked.connect(
+            lambda _checked=False: choose_output()
+        )
     parts["raster_combo"].currentTextChanged.connect(controller.set_raster)
     parts["scope_combo"].currentIndexChanged.connect(on_scope)
     parts["polygon_combo"].currentTextChanged.connect(
@@ -311,6 +322,10 @@ def render(dock: Any, state: Any) -> None:
     parts["progress"].setValue(state.progress_percent)
 
     lines = [tr(state.message)] if state.message else []
+    if not state.message and not state.phase.is_busy:
+        reason = state.blocking_reason
+        if reason:
+            lines.append(tr(reason))
     lines.extend(tr(warning) for warning in state.warnings)
     parts["status"].setText("\n".join(lines))
 
@@ -342,6 +357,7 @@ def render(dock: Any, state: Any) -> None:
         "duplicate_iou",
         "device",
         "output_path",
+        "output_browse",
         "write_centers",
         "write_boxes",
         "classes",

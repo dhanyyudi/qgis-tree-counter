@@ -45,6 +45,22 @@ class Phase(str, Enum):
         return self in (Phase.INSPECTING, Phase.RUNNING)
 
 
+# Why Start is not available yet, in the order the panel is filled in. A
+# disabled button with no explanation is a dead end: everything else can
+# be set correctly and Start still stays grey.
+BLOCKING_REASONS = {
+    "raster": "Choose a raster layer to count trees in.",
+    "model": "Choose a detection model.",
+    "inspecting": "Waiting for the model to be inspected.",
+    "trust": "Confirm this PyTorch checkpoint before it can be used.",
+    "classes": "Select at least one class to count.",
+    "runtime": "Install the Tree Counter runtime first.",
+    "polygon": "Choose the polygon layer that defines the scope.",
+    "layers": "Select at least one output layer.",
+    "output": "Choose where to write the results.",
+}
+
+
 @dataclass(frozen=True)
 class ModelChoice:
     """A chosen model, once it has been hashed and inspected."""
@@ -107,6 +123,30 @@ class ViewState:
         if not (self.write_centers or self.write_boxes):
             return False
         return bool(self.output_path)
+
+    @property
+    def blocking_reason(self) -> str:
+        """Return why Start is unavailable, or an empty string."""
+
+        if not self.raster_name:
+            return BLOCKING_REASONS["raster"]
+        if self.model is None:
+            return BLOCKING_REASONS["model"]
+        if self.model.needs_trust and not self.model.trusted:
+            return BLOCKING_REASONS["trust"]
+        if not self.model.inspected:
+            return BLOCKING_REASONS["inspecting"]
+        if not self.selected_class_ids:
+            return BLOCKING_REASONS["classes"]
+        if self.runtime_state != "ready":
+            return BLOCKING_REASONS["runtime"]
+        if self.scope is ScopeKind.POLYGON and not self.polygon_layer_name:
+            return BLOCKING_REASONS["polygon"]
+        if not (self.write_centers or self.write_boxes):
+            return BLOCKING_REASONS["layers"]
+        if not self.output_path:
+            return BLOCKING_REASONS["output"]
+        return ""
 
     @property
     def primary_action(self) -> str:
@@ -442,6 +482,7 @@ class CountingController:
 
 
 __all__ = [
+    "BLOCKING_REASONS",
     "CountingController",
     "ModelChoice",
     "Phase",

@@ -142,6 +142,11 @@ def _visible_sources() -> set[str]:
     for name in ("dock.py", "widgets.py", "runtime_dialog.py"):
         sources.update(_tr_literals(PACKAGE / "ui" / name))
     sources.update(_message_literals(PACKAGE / "ui" / "controller.py"))
+    sources.update(
+        _constant_strings(
+            PACKAGE / "ui" / "controller.py", {"BLOCKING_REASONS"}
+        )
+    )
     sources.update(_safe_message_values(PACKAGE / "errors.py"))
     sources.update(
         _constant_strings(

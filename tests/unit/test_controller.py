@@ -514,3 +514,43 @@ def test_a_failed_selection_does_not_keep_the_previous_model() -> None:
 
     assert state.model is None
     assert state.can_start is False
+
+
+def test_a_complete_selection_has_nothing_blocking_it() -> None:
+    controller = _controller()
+
+    state = _ready(controller)
+
+    assert state.can_start is True
+    assert state.blocking_reason == ""
+
+
+def test_the_missing_output_path_is_named() -> None:
+    """A disabled Start button must say what it is waiting for.
+
+    Everything else can be set correctly and Start still stays grey; with
+    no explanation the user has no way to discover which field is empty.
+    """
+
+    from tree_counter.qgis_adapter.scope import ScopeKind
+    from tree_counter.ui.controller import BLOCKING_REASONS
+
+    controller = _controller()
+    controller.set_raster("aerial")
+    controller.set_scope(ScopeKind.WHOLE_RASTER)
+    controller.select_model("/models/best.onnx")
+
+    state = controller.state
+
+    assert state.can_start is False
+    assert state.blocking_reason == BLOCKING_REASONS["output"]
+
+
+def test_the_missing_raster_is_named_before_anything_else() -> None:
+    """The reason follows the order the user fills the panel in."""
+
+    from tree_counter.ui.controller import BLOCKING_REASONS
+
+    controller = _controller()
+
+    assert controller.state.blocking_reason == BLOCKING_REASONS["raster"]

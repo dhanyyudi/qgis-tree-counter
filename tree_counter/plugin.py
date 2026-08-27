@@ -22,6 +22,7 @@ MENU_TITLE = "&Tree Counter"
 ACTION_TEXT = "Tree Counter"
 MODEL_DIALOG_TITLE = "Choose a detection model"
 MODEL_FILE_FILTER = "Detection models (*.onnx *.pt)"
+OUTPUT_DIALOG_TITLE = "Choose where to write the results"
 ICON_RELATIVE = "icons/tree_counter.svg"
 
 
@@ -114,6 +115,7 @@ class TreeCounterPlugin:
             parent=self.iface.mainWindow(),
             open_runtime_manager=self.show_runtime_manager,
             choose_model=self.choose_model,
+            choose_output=self.choose_output,
         )
         self._connect_project(dock)
         return dock
@@ -141,6 +143,18 @@ class TreeCounterPlugin:
 
         set_raster_choices(dock, raster_layer_names())
         set_polygon_choices(dock, polygon_layer_names())
+
+    def choose_output(self) -> str:
+        """Ask where results should be written."""
+
+        from qgis.PyQt.QtWidgets import QFileDialog
+
+        directory = QFileDialog.getExistingDirectory(
+            self.iface.mainWindow(), OUTPUT_DIALOG_TITLE, ""
+        )
+        if directory and self._controller is not None:
+            self._controller.set_output_path(directory)
+        return str(directory or "")
 
     def choose_model(self) -> str:
         """Ask for a model file and hand it to the controller."""
