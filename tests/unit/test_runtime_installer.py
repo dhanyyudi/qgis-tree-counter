@@ -10,6 +10,18 @@ from pathlib import Path
 import pytest
 
 
+def _probe_report(version: str) -> dict[str, object]:
+    """Return a complete supported-interpreter probe payload."""
+
+    return {
+        "version": version,
+        "has_venv": True,
+        "has_ssl": True,
+        "has_ensurepip": True,
+        "is_64bit": True,
+    }
+
+
 def _plan(components=("onnxruntime",)):
     from tree_counter.runtime.installer import InstallPlan
 
@@ -758,3 +770,113 @@ def test_the_install_log_redacts_token_like_values(tmp_path: Path) -> None:
     assert hidden[0] not in text
     assert hidden[1] not in text
     assert "[redacted]" in text
+
+
+def test_host_python_selection_skips_unsupported_candidates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Selection probes every candidate until a supported one is found."""
+
+    from tree_counter.runtime import python_probe
+    from tree_counter.runtime.installer import RuntimeInstaller
+    from tree_counter.runtime.paths import RuntimePaths
+
+    candidates = (
+        "/opt/homebrew/bin/python3",
+        "/opt/homebrew/bin/python3.12",
+    )
+    reports = {
+        candidates[0]: python_probe.PythonProbe.from_report(
+            candidates[0],
+            _probe_report("3.14.6"),
+        ),
+        candidates[1]: python_probe.PythonProbe.from_report(
+            candidates[1],
+            _probe_report("3.12.13"),
+        ),
+    }
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        python_probe,
+        "discover_candidates",
+        lambda environment=None: candidates,
+    )
+    monkeypatch.setattr(
+        python_probe,
+        "probe_python",
+        lambda executable, runner: calls.append(executable)
+        or reports[executable],
+    )
+    installer = RuntimeInstaller(
+        paths=RuntimePaths(tmp_path / "runtime"),
+        runner=FakeRunner(),
+        lock_root=tmp_path / "locks",
+        expected_root=tmp_path / "runtime",
+    )
+
+    selected = installer.select_host_python()
+
+    assert selected.executable == candidates[1]
+    assert selected.version == "3.12.13"
+    assert calls == list(candidates)
+
+
+def test_host_python_selection_has_no_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No supported candidate is a clear error rather than QGIS fallback."""
+
+    from tree_counter.runtime import python_probe
+    from tree_counter.runtime.installer import InstallError, RuntimeInstaller
+    from tree_counter.runtime.paths import RuntimePaths
+
+    candidates = ("/opt/homebrew/bin/python3",)
+    monkeypatch.setattr(
+        python_probe,
+        "discover_candidates",
+        lambda environment=None: candidates,
+    )
+    monkeypatch.setattr(
+        python_probe,
+        "probe_python",
+        lambda executable, runner: python_probe.PythonProbe.from_report(
+            executable, _probe_report("3.14.6")
+        ),
+    )
+    installer = RuntimeInstaller(
+        paths=RuntimePaths(tmp_path / "runtime"),
+        runner=FakeRunner(),
+        lock_root=tmp_path / "locks",
+        expected_root=tmp_path / "runtime",
+    )
+
+    with pytest.raises(InstallError) as raised:
+        installer.select_host_python()
+
+    from tree_counter.errors import ErrorCode
+
+    assert raised.value.code is ErrorCode.NO_SUPPORTED_PYTHON
+    assert "3.12" in raised.value.user_message
+    assert "sys.executable" not in raised.value.diagnostic_detail
+    logs = sorted((tmp_path / "runtime" / "logs").glob("*.log"))
+    assert logs
+    log_text = logs[-1].read_text(encoding="utf-8")
+    assert candidates[0] in log_text
+    assert "3.14.6" in log_text
+
+
+def test_failed_first_install_reports_install_failure_code(
+    tmp_path: Path,
+) -> None:
+    """A process failure is not mislabeled as an incompatible runtime."""
+
+    from tree_counter.errors import ErrorCode
+    from tree_counter.runtime.installer import InstallError
+
+    installer = _installer(tmp_path, FakeRunner(failures=("pip",)))
+
+    with pytest.raises(InstallError) as raised:
+        installer.install(_plan())
+
+    assert raised.value.code is ErrorCode.RUNTIME_INSTALL_FAILURE

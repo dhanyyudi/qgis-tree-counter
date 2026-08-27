@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 
@@ -44,6 +45,20 @@ class FakeInstaller:
 
     def remove(self):
         self._record("remove")
+
+    def select_host_python(self, operation="install"):
+        from tree_counter.runtime.python_probe import PythonProbe
+
+        return PythonProbe.from_report(
+            "/opt/homebrew/bin/python3.12",
+            {
+                "version": "3.12.13",
+                "has_venv": True,
+                "has_ssl": True,
+                "has_ensurepip": True,
+                "is_64bit": True,
+            },
+        )
 
 
 def _dialog(tmp_path: Path, state, confirm=True, fail=None):
@@ -166,7 +181,7 @@ def test_a_failed_runtime_action_translates_both_failure_lines(
 
         assert dialog.run_action("update") is False
         text = dialog.status_label.text()
-        assert "Runtime yang terpasang tidak kompatibel." in text
+        assert "Runtime Tree Counter tidak dapat dipasang." in text
         assert "Runtime sebelumnya dipertahankan." in text
         assert "The installed runtime is not compatible." not in text
     finally:
@@ -266,6 +281,49 @@ def test_a_failed_action_explains_that_the_old_runtime_was_kept(
 
     assert dialog.run_action("update") is False
     assert "previous runtime was kept" in dialog.status_label.text()
+
+
+def test_a_failed_first_install_does_not_claim_a_previous_runtime(
+    qgis_application, tmp_path: Path
+) -> None:
+    """A first-install failure explains that no runtime was changed."""
+
+    from tree_counter.runtime.paths import RuntimeState
+
+    dialog, _ = _dialog(tmp_path, RuntimeState.NOT_INSTALLED, fail="install")
+
+    assert dialog.run_action("install") is False
+    text = dialog.status_label.text()
+    assert "previous runtime was kept" not in text
+    assert "Nothing was changed." in text
+
+
+def test_plan_uses_the_probe_identity_not_qgis_identity(
+    qgis_application, tmp_path: Path
+) -> None:
+    """Install plans use the selected host Python's executable and version."""
+
+    from tree_counter.runtime.paths import RuntimeState
+
+    dialog, _ = _dialog(tmp_path, RuntimeState.NOT_INSTALLED)
+    plan = dialog._plan(dialog._offers())
+
+    assert plan.python_executable == "/opt/homebrew/bin/python3.12"
+    assert plan.python_version == "3.12.13"
+    assert plan.python_executable != sys.executable
+
+
+def test_text_groups_stay_at_the_top_of_the_dialog(
+    qgis_application, tmp_path: Path
+) -> None:
+    """The dialog gives its text area an expanding spacer before buttons."""
+
+    from tree_counter.runtime.paths import RuntimeState
+
+    dialog, _ = _dialog(tmp_path, RuntimeState.NOT_INSTALLED)
+    layout = dialog.widget.layout()
+
+    assert layout.itemAt(3).spacerItem() is not None
 
 
 def test_accelerators_are_only_offered_where_supported(

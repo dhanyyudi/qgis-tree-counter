@@ -48,6 +48,7 @@ PACKAGE_MANIFEST = (
     "qgis_adapter/output.py",
     "qgis_adapter/process.py",
     "qgis_adapter/raster.py",
+    "qgis_adapter/runtime_process.py",
     "qgis_adapter/scope.py",
     "qgis_adapter/task.py",
     "qgis_adapter/workspace.py",

@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 import re
 import shutil
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from tree_counter.errors import ErrorCode, TreeCounterError
 from tree_counter.runtime.catalog import (
@@ -102,10 +103,12 @@ _SECRET_PATTERNS = (
 class InstallError(TreeCounterError):
     """A runtime mutation could not be completed."""
 
-    def __init__(self, detail: str) -> None:
-        super().__init__(
-            ErrorCode.INCOMPATIBLE_RUNTIME, diagnostic_detail=detail
-        )
+    def __init__(
+        self,
+        detail: str,
+        code: ErrorCode = ErrorCode.RUNTIME_INSTALL_FAILURE,
+    ) -> None:
+        super().__init__(code, diagnostic_detail=detail)
 
 
 class InstallCancelled(TreeCounterError):
@@ -222,6 +225,7 @@ class RuntimeInstaller:
             clock = time.time
         self._clock = clock
         self._log: list[str] = []
+        self._host_python_log: list[str] = []
 
     # -- public lifecycle ------------------------------------------------
 
@@ -366,6 +370,49 @@ class RuntimeInstaller:
 
         return self._transaction(plan, progress, should_cancel, "install")
 
+    def select_host_python(self, operation: str = "install") -> Any:
+        """Return a supported host Python and record every probe result.
+
+        QGIS's interpreter is intentionally not used as the implicit base
+        candidate. Discovery is performed from the process environment, and
+        every candidate is probed through the injected runner.
+        """
+
+        from tree_counter.runtime.python_probe import (
+            discover_candidates,
+            probe_python,
+            select_python,
+        )
+
+        candidates = discover_candidates(environment=os.environ)
+        self._host_python_log = []
+
+        def probe(candidate: str) -> Any:
+            result = probe_python(candidate, self._runner)
+            if result.is_supported:
+                self._host_python_log.append(
+                    f"selected host Python {candidate} ({result.version})"
+                )
+            else:
+                reason = "; ".join(result.reasons) or "unsupported"
+                self._host_python_log.append(
+                    f"skipped host Python {candidate}: {reason}"
+                )
+            return result
+
+        selected = select_python(candidates, probe)
+        if selected is not None:
+            return selected
+
+        self._host_python_log.append("no supported host Python candidate")
+        self._log = [f"{operation} started", *self._host_python_log]
+        self._write_log(operation, self._paths.root)
+        self._host_python_log = []
+        raise InstallError(
+            "no supported Python 3.12 interpreter was found",
+            code=ErrorCode.NO_SUPPORTED_PYTHON,
+        )
+
     def update(
         self,
         plan: InstallPlan,
@@ -443,7 +490,8 @@ class RuntimeInstaller:
     ) -> RuntimeManifest:
         self._assert_expected_root()
         root = assert_safe_runtime_root(self._paths.root, home=self._home)
-        self._log = [f"{operation} started"]
+        self._log = [f"{operation} started", *self._host_python_log]
+        self._host_python_log = []
         locks = self._resolve_locks(plan)
         self._check_python(plan)
 
@@ -532,7 +580,8 @@ class RuntimeInstaller:
     def _check_python(self, plan: InstallPlan) -> None:
         if not self._catalog.supports_python(plan.python_version):
             raise InstallError(
-                f"Python {plan.python_version} is outside the supported range"
+                f"Python {plan.python_version} is outside the supported range",
+                code=ErrorCode.INCOMPATIBLE_RUNTIME,
             )
 
     def _create_venv(self, plan: InstallPlan, staging: Path) -> None:

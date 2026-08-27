@@ -269,6 +269,7 @@ class RuntimeManagerDialog:
         self.location_label = QtWidgets.QLabel("")
         self.location_label.setWordWrap(True)
         layout.addWidget(self.location_label)
+        layout.addStretch(1)
 
         self.buttons: dict[str, Any] = {}
         row = QtWidgets.QHBoxLayout()
@@ -341,10 +342,12 @@ class RuntimeManagerDialog:
             self._perform(action, offers)
         except Exception as error:
             message = tr(getattr(error, "user_message", str(error)))
-            self.status_label.setText(
-                f"{message}\n"
-                + tr("The previous runtime was kept.")
-            )
+            lines = [message]
+            if status.state is not RuntimeState.NOT_INSTALLED:
+                lines.append(tr("The previous runtime was kept."))
+            else:
+                lines.append(tr("Nothing was changed."))
+            self.status_label.setText("\n".join(lines))
             return False
         self.refresh()
         return True
@@ -358,22 +361,21 @@ class RuntimeManagerDialog:
         if action == "verify":
             self._installer.verify()
             return
-        plan = self._plan(offers)
+        plan = self._plan(offers, action)
         getattr(self._installer, action)(plan)
 
-    def _plan(self, offers: tuple[ComponentOffer, ...]) -> Any:
-        import sys
-
+    def _plan(
+        self, offers: tuple[ComponentOffer, ...], operation: str = "install"
+    ) -> Any:
         from tree_counter.runtime.catalog import platform_key
         from tree_counter.runtime.installer import InstallPlan
 
+        host_python = self._installer.select_host_python(operation)
         return InstallPlan(
             components=tuple(offer.name for offer in offers),
             platform=self._platform or platform_key(),
-            python_executable=sys.executable,
-            python_version=".".join(
-                str(part) for part in sys.version_info[:3]
-            ),
+            python_executable=host_python.executable,
+            python_version=host_python.version,
         )
 
     def open_logs(self) -> bool:

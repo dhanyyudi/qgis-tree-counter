@@ -236,19 +236,12 @@ class TreeCounterPlugin:
             RuntimePaths,
             default_runtime_root,
         )
+        from tree_counter.qgis_adapter.runtime_process import QProcessRunner
 
         return RuntimeInstaller(
             paths=RuntimePaths(default_runtime_root()),
-            runner=self._unavailable_runner,
+            runner=QProcessRunner(),
             lock_root=Path(__file__).resolve().parent / "runtime" / "locks",
-        )
-
-    @staticmethod
-    def _unavailable_runner(argv, timeout):
-        """Refuse to run a process outside the Runtime Manager."""
-
-        raise RuntimeError(
-            "runtime changes are only made from the Runtime Manager"
         )
 
     def show_runtime_manager(self) -> Any:

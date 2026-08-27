@@ -188,6 +188,14 @@
         <translation>Runtime yang terpasang tidak kompatibel.</translation>
     </message>
     <message>
+        <source>The Tree Counter runtime could not be installed.</source>
+        <translation>Runtime Tree Counter tidak dapat dipasang.</translation>
+    </message>
+    <message>
+        <source>No supported Python 3.12 interpreter was found.</source>
+        <translation>Tidak ditemukan interpreter Python 3.12 yang didukung.</translation>
+    </message>
+    <message>
         <source>The counting worker sent an invalid response.</source>
         <translation>Worker penghitungan mengirim respons yang tidak valid.</translation>
     </message>
@@ -350,6 +358,10 @@
     <message>
         <source>The previous runtime was kept.</source>
         <translation>Runtime sebelumnya dipertahankan.</translation>
+    </message>
+    <message>
+        <source>Nothing was changed.</source>
+        <translation>Tidak ada yang diubah.</translation>
     </message>
     <message>
         <source>There are no runtime logs yet.</source>
