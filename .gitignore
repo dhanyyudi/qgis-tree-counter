@@ -41,3 +41,7 @@ AGENTS.[mM][dD]
 graphify-[o]ut/
 docs/[i]nternal/
 *.local.md
+
+# QGIS writes this into the working directory when QgsApplication starts
+# headless during tests.
+symbology-style.db
