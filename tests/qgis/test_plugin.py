@@ -161,3 +161,49 @@ def test_the_output_request_honours_the_chosen_layers(
     assert request.write_centers is False
     assert request.write_boxes is True
     assert request.directory == tmp_path
+
+
+def test_a_task_terminating_after_unload_does_not_reach_the_controller(
+    plugin,
+) -> None:
+    """Unload drops the controller while the task is still running.
+
+    Cancellation is asynchronous, so the task emits its terminal event
+    after unload. Left connected, that called on_cancelled on a
+    controller that no longer exists and raised inside QGIS.
+    """
+
+    class RunningTask:
+        def __init__(self) -> None:
+            self.cancelled = False
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    instance, _iface = plugin
+    task = RunningTask()
+    task.terminal_event = _FakeSignal()
+    task.terminal_event.connect(instance._on_terminal)
+    instance._task = task
+
+    instance.unload()
+    task.terminal_event.emit({"type": "cancelled"})
+
+    assert task.cancelled is True
+
+
+class _FakeSignal:
+    """A minimal stand-in for a pyqtSignal carrying a dict."""
+
+    def __init__(self) -> None:
+        self._slots: list = []
+
+    def connect(self, slot) -> None:
+        self._slots.append(slot)
+
+    def disconnect(self, slot) -> None:
+        self._slots.remove(slot)
+
+    def emit(self, payload: dict) -> None:
+        for slot in list(self._slots):
+            slot(payload)

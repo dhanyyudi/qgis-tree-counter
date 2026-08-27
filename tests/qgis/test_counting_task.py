@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 PROTOCOL = 1
 
 
@@ -299,3 +301,53 @@ def test_events_reaching_the_controller_are_plain_dicts(
 
     assert events
     assert all(isinstance(event, dict) for event in events)
+
+
+def test_cancelling_interrupts_a_blocking_worker_read(
+    qgis_application, tmp_path
+) -> None:
+    """Cancel must not wait out the 120-second read timeout.
+
+    During tile inference the run sits inside a blocking
+    ``WorkerChannel.receive()``. Setting a flag alone cannot be observed
+    until that read returns, so Cancel would appear stuck and then be
+    reported as a worker failure rather than a cancellation.
+    """
+
+    closed: list[int] = []
+
+    class SpyChannel:
+        def close(self) -> None:
+            closed.append(1)
+
+    task, _events = _task(
+        qgis_application, tmp_path, None, channel=SpyChannel()
+    )
+
+    assert task.cancel() is True
+    assert closed == [1], "cancel left the blocking read running"
+
+
+def test_an_interrupted_read_is_reported_as_a_cancellation(
+    qgis_application, tmp_path
+) -> None:
+    """A read that fails because we cancelled is not a worker failure."""
+
+    from tree_counter.errors import ErrorCode, TreeCounterError
+    from tree_counter.qgis_adapter.task import CountingRun, RunCancelled
+
+    class BrokenChannel:
+        def receive(self, timeout_ms=None):
+            raise TreeCounterError(ErrorCode.WORKER_PROCESS_FAILURE)
+
+    cancelled = {"value": False}
+    run = CountingRun(
+        BrokenChannel(),
+        None,
+        None,
+        should_cancel=lambda: cancelled["value"],
+    )
+    cancelled["value"] = True
+
+    with pytest.raises(RunCancelled):
+        run._await("run-1", "model_info", None)

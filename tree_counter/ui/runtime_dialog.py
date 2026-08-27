@@ -266,6 +266,7 @@ class RuntimeManagerDialog:
         confirm: Any = None,
         catalog: Any = None,
         platform: str | None = None,
+        on_changed: Any = None,
     ) -> None:
         from qgis.PyQt import QtWidgets
 
@@ -273,6 +274,7 @@ class RuntimeManagerDialog:
         self._confirm = confirm or self._ask
         self._catalog = catalog
         self._platform = platform
+        self._on_changed = on_changed
         self.started: list[str] = []
 
         self.widget = QtWidgets.QDialog(parent)
@@ -373,6 +375,11 @@ class RuntimeManagerDialog:
             self.status_label.setText("\n".join(lines))
             return False
         self.refresh()
+        if self._on_changed is not None:
+            # The dock caches the runtime state; nothing else tells it to
+            # look again, so an installed runtime would still read as
+            # "not installed" until QGIS restarted.
+            self._on_changed()
         return True
 
     def _perform(

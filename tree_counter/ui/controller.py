@@ -226,6 +226,10 @@ class CountingController:
         try:
             identity = self._identify_model(str(path))
         except TreeCounterError as error:
+            # Keeping the previous choice would leave its hash on screen
+            # and let Start pair it with a file that never identified.
+            self._identity = None
+            self._update(model=None, selected_class_ids=())
             return self._fail(error)
         self._identity = identity
         needs_trust = bool(

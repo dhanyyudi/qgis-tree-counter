@@ -472,3 +472,45 @@ def test_the_controller_performs_no_network_operation() -> None:
 
     for marker in ("urllib", "requests", "http", "socket", "QNetwork"):
         assert marker not in source, marker
+
+
+def test_a_failed_selection_does_not_keep_the_previous_model() -> None:
+    """A stale choice would pair an old hash with a new, unusable file.
+
+    The previous ModelChoice stayed on the state after a failed
+    selection, so its hash could still reach a run while the plugin had
+    already moved on to the file the user just picked.
+    """
+
+    from tree_counter.errors import ErrorCode, TreeCounterError
+    from tree_counter.qgis_adapter.scope import ScopeKind
+    from tree_counter.ui.controller import CountingController
+
+    attempts: list[str] = []
+    identity = FakeIdentity(suffix=".onnx")
+
+    def identify(path):
+        attempts.append(str(path))
+        if len(attempts) > 1:
+            raise TreeCounterError(ErrorCode.INVALID_MODEL)
+        return identity
+
+    controller = CountingController(
+        identify_model=identify,
+        inspect_model=lambda chosen: {
+            "class_names": ["oil_palm"],
+            "backend": "onnxruntime",
+        },
+        trust_store=FakeTrustStore(True),
+        runtime_status=lambda: "ready",
+    )
+    controller.set_raster("aerial")
+    controller.set_scope(ScopeKind.WHOLE_RASTER)
+    controller.set_output_path("/tmp/out.gpkg")
+    controller.select_model("/models/good.onnx")
+    assert controller.state.model is not None
+
+    state = controller.select_model("/models/missing.onnx")
+
+    assert state.model is None
+    assert state.can_start is False

@@ -62,6 +62,13 @@ class TreeCounterPlugin:
         """Remove everything this plugin added to the QGIS window."""
 
         if self._task is not None:
+            # The task keeps running after unload and will emit its
+            # terminal event later. Leaving it connected would call back
+            # into a controller this method is about to drop.
+            try:
+                self._task.terminal_event.disconnect(self._on_terminal)
+            except (TypeError, RuntimeError):
+                pass
             self._task.cancel()
             self._task = None
         if self._translator is not None:
@@ -116,8 +123,12 @@ class TreeCounterPlugin:
         from tree_counter.ui.controller import CountingController
 
         def identify_and_remember(path: Any) -> Any:
+            # Only a file that identified cleanly may become the path a
+            # run uses. Recording it first would pair a new, unreadable
+            # path with the previous model's hash.
+            identity = identify_model(path)
             self._model_path = str(path)
-            return identify_model(path)
+            return identity
 
         store = SettingsStore(default_settings_path())
         return CountingController(
@@ -244,13 +255,21 @@ class TreeCounterPlugin:
             lock_root=Path(__file__).resolve().parent / "runtime" / "locks",
         )
 
+    def _refresh_runtime_state(self) -> None:
+        """Let the dock re-read the runtime after the Manager changed it."""
+
+        if self._controller is not None:
+            self._controller.refresh_runtime()
+
     def show_runtime_manager(self) -> Any:
         """Open the Runtime Manager dialog."""
 
         from tree_counter.ui.runtime_dialog import RuntimeManagerDialog
 
         dialog = RuntimeManagerDialog(
-            self._installer(), parent=self.iface.mainWindow()
+            self._installer(),
+            parent=self.iface.mainWindow(),
+            on_changed=self._refresh_runtime_state,
         )
         dialog.show()
         return dialog
@@ -282,6 +301,8 @@ class TreeCounterPlugin:
     def _on_terminal(self, event: dict) -> None:
         kind = str(event.get("type", ""))
         self._task = None
+        if self._controller is None:
+            return
         if kind == "completed":
             self._controller.on_completed(
                 event.get("result"), event.get("output_path", "")

@@ -418,3 +418,69 @@ def test_the_dialog_shows_translated_progress_while_installing(
     assert "Menyiapkan lingkungan runtime" in seen[0]
     assert "ONNX Runtime (CPU)" in seen[1]
     assert "Installing" not in seen[1]
+
+
+def test_a_successful_action_reports_that_the_runtime_changed(
+    qgis_application, tmp_path: Path
+) -> None:
+    """The dock caches the runtime state and must be told to re-read it.
+
+    Without this the dock still said "Runtime: not installed" after a
+    successful install, because nothing ever asked the controller to look
+    again.
+    """
+
+    from tree_counter.runtime.paths import RuntimeState
+    from tree_counter.ui.runtime_dialog import RuntimeManagerDialog
+
+    changes: list[int] = []
+    installer = FakeInstaller(RuntimeState.NOT_INSTALLED, tmp_path)
+    dialog = RuntimeManagerDialog(
+        installer,
+        confirm=lambda text: True,
+        platform="macos-arm64",
+        on_changed=lambda: changes.append(1),
+    )
+
+    assert dialog.run_action("install") is True
+    assert changes == [1]
+
+
+def test_a_refused_action_reports_no_change(
+    qgis_application, tmp_path: Path
+) -> None:
+    """Declining the confirmation changed nothing, so say nothing."""
+
+    from tree_counter.runtime.paths import RuntimeState
+    from tree_counter.ui.runtime_dialog import RuntimeManagerDialog
+
+    changes: list[int] = []
+    dialog = RuntimeManagerDialog(
+        FakeInstaller(RuntimeState.NOT_INSTALLED, tmp_path),
+        confirm=lambda text: False,
+        platform="macos-arm64",
+        on_changed=lambda: changes.append(1),
+    )
+
+    assert dialog.run_action("install") is False
+    assert changes == []
+
+
+def test_a_failed_action_reports_no_change(
+    qgis_application, tmp_path: Path
+) -> None:
+    """A failed install leaves the runtime as it was."""
+
+    from tree_counter.runtime.paths import RuntimeState
+    from tree_counter.ui.runtime_dialog import RuntimeManagerDialog
+
+    changes: list[int] = []
+    dialog = RuntimeManagerDialog(
+        FakeInstaller(RuntimeState.NOT_INSTALLED, tmp_path, fail="install"),
+        confirm=lambda text: True,
+        platform="macos-arm64",
+        on_changed=lambda: changes.append(1),
+    )
+
+    assert dialog.run_action("install") is False
+    assert changes == []

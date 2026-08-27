@@ -26,11 +26,9 @@ TEST_BACKENDS_VARIABLE = "TREE_COUNTER_TEST_BACKENDS"
 SUPPORTED_BACKENDS = ("pt", "onnx")
 SUPPORTED_SCOPES = ("bounded", "full")
 BACKEND_COMPONENTS = {"pt": "pytorch", "onnx": "onnxruntime"}
-INTEGRATION_TARGETS = (
-    "tests/integration/test_real_model.py",
-    "tests/integration/test_real_raster.py",
-    "tests/integration/test_backend_parity.py",
-)
+# The real runs need QGIS for the raster and the output layers, so they
+# live in tests/qgis and are executed through scripts/run_qgis_tests.py.
+INTEGRATION_TARGETS = ("tests/qgis/test_real_run.py",)
 
 
 class IntegrationConfigurationError(ValueError):

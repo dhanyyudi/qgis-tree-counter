@@ -351,7 +351,13 @@ class CountingRun:
         wanted = (expected,) if isinstance(expected, str) else tuple(expected)
         while True:
             self._guard()
-            message = self._channel.receive()
+            try:
+                message = self._channel.receive()
+            except TreeCounterError:
+                # Cancelling closes the channel on purpose, so a read that
+                # fails after that is a cancellation, not a worker fault.
+                self._guard()
+                raise
             kind = str(message["type"])
             if kind == "warning":
                 text = str(message.get("message", ""))
@@ -459,9 +465,23 @@ class CountingTask(QgsTask):
         self._started_at = ""
 
     def cancel(self) -> bool:
-        """Ask the run to stop at its next cancellation check."""
+        """Stop the run, interrupting a blocking worker read.
+
+        During tile inference the run sits inside a blocking
+        ``WorkerChannel.receive()``. A flag alone is not observed until
+        that read returns - up to the read timeout - so Cancel would look
+        stuck and then surface as a worker failure. Closing the channel
+        makes the read return now; the run sees the cancellation flag and
+        reports a cancellation.
+        """
 
         self._cancelled = True
+        channel = getattr(self, "_channel", None)
+        if channel is not None:
+            try:
+                channel.close()
+            except (TreeCounterError, OSError):
+                pass
         return True
 
     def run(self) -> bool:
