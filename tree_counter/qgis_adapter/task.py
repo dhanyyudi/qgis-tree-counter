@@ -20,7 +20,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from threading import Lock
+from threading import RLock
 from typing import Any, Protocol, runtime_checkable
 
 from tree_counter.constants import PROTOCOL_VERSION
@@ -464,7 +464,7 @@ class CountingTask(QgsTask):
         self._crs = crs
         self._cancelled = False
         self._terminal_committed = False
-        self._cancel_lock = Lock()
+        self._cancel_lock = RLock()
         self._should_cancel = (
             should_cancel
             if should_cancel is not None
@@ -524,20 +524,11 @@ class CountingTask(QgsTask):
             self._channel.close()
             self._workspace.close(keep_log=keep_log)
         try:
-            self._commit_completion(published)
-        except RunCancelled:
-            self.terminal_event.emit({"type": "cancelled"})
-            return False
+            if not self._emit_terminal_result(result, published):
+                return False
         except TreeCounterError as error:
             self.terminal_event.emit({"type": "failed", "error": error})
             return False
-        self.terminal_event.emit(
-            {
-                "type": "completed",
-                "result": result,
-                "output_path": str(published),
-            }
-        )
         return True
 
     # -- helpers ---------------------------------------------------------
@@ -589,16 +580,25 @@ class CountingTask(QgsTask):
             self._remove_published(published)
         raise RunCancelled()
 
-    def _commit_completion(self, published: Path | None) -> None:
-        """Atomically choose completed or cancelled as terminal state."""
+    def _emit_terminal_result(
+        self, result: RunResult, published: Path
+    ) -> bool:
+        """Atomically choose and emit the run's terminal state."""
 
         with self._cancel_lock:
             if not self._cancelled:
                 self._terminal_committed = True
-                return
-        if published is not None:
-            self._remove_published(published)
-        raise RunCancelled()
+                self.terminal_event.emit(
+                    {
+                        "type": "completed",
+                        "result": result,
+                        "output_path": str(published),
+                    }
+                )
+                return True
+        self._remove_published(published)
+        self.terminal_event.emit({"type": "cancelled"})
+        return False
 
     @staticmethod
     def _remove_published(published: Path) -> None:

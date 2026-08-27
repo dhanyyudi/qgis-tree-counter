@@ -399,3 +399,21 @@ def test_cancel_during_publication_removes_output_and_wins_terminal_state(
     assert task.run() is False
     assert events == [{"type": "cancelled"}]
     assert not published.exists()
+
+
+def test_completion_event_is_the_atomic_terminal_boundary(
+    qgis_application, tmp_path: Path
+) -> None:
+    task, events = _task(
+        qgis_application, tmp_path, ScriptedTransport(_happy_replies())
+    )
+
+    def cancel_at_delivery(event: dict) -> None:
+        if event["type"] == "completed":
+            task.cancel()
+
+    task.terminal_event.connect(cancel_at_delivery)
+
+    assert task.run() is True
+    assert [event["type"] for event in events] == ["completed"]
+    assert Path(events[0]["output_path"]).is_file()
