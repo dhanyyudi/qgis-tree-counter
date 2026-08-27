@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from types import ModuleType
 
 import pytest
@@ -267,3 +268,53 @@ def test_the_dedicated_task_manager_adapter_is_packaged() -> None:
     )
 
     assert adapter.is_file()
+
+
+@pytest.mark.parametrize(
+    ("write_centers", "write_boxes", "expected_layers"),
+    [
+        (True, False, ["tree_centers"]),
+        (False, True, ["detection_boxes"]),
+        (True, True, ["tree_centers", "detection_boxes"]),
+    ],
+)
+def test_a_completed_run_loads_the_requested_result_layers(
+    qgis_application,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    write_centers: bool,
+    write_boxes: bool,
+    expected_layers: list[str],
+) -> None:
+    from tree_counter.plugin import TreeCounterPlugin
+    from tree_counter.qgis_adapter import output
+
+    loaded: list[tuple[Path, list[str]]] = []
+    monkeypatch.setattr(
+        output,
+        "load_result_layers",
+        lambda path, names: loaded.append((path, list(names))),
+    )
+
+    class FakeController:
+        state = SimpleNamespace(
+            write_centers=write_centers,
+            write_boxes=write_boxes,
+        )
+
+        def on_completed(self, result, output_path) -> None:
+            pass
+
+    plugin = TreeCounterPlugin(None)
+    plugin._controller = FakeController()
+    output_path = tmp_path / "counting.gpkg"
+
+    plugin._on_terminal(
+        {
+            "type": "completed",
+            "result": object(),
+            "output_path": str(output_path),
+        }
+    )
+
+    assert loaded == [(output_path, expected_layers)]

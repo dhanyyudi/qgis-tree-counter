@@ -362,13 +362,44 @@ class TreeCounterPlugin:
         if self._controller is None:
             return
         if kind == "completed":
-            self._controller.on_completed(
-                event.get("result"), event.get("output_path", "")
-            )
+            output_path = str(event.get("output_path", ""))
+            self._controller.on_completed(event.get("result"), output_path)
+            self._load_result_layers(output_path)
         elif kind == "cancelled":
             self._controller.on_cancelled()
         else:
             self._controller.on_failed(event.get("error"))
+
+    def _load_result_layers(self, output_path: str) -> None:
+        """Load only the result layers selected for the completed run."""
+
+        from tree_counter.qgis_adapter.output import (
+            BOXES_LAYER,
+            CENTERS_LAYER,
+            load_result_layers,
+        )
+
+        state = self._controller.state
+        layer_names = []
+        if state.write_centers:
+            layer_names.append(CENTERS_LAYER)
+        if state.write_boxes:
+            layer_names.append(BOXES_LAYER)
+        try:
+            load_result_layers(Path(output_path), layer_names)
+        except Exception as error:
+            # The GeoPackage has already been atomically published. A QGIS
+            # provider error must not turn a completed count into a failed
+            # run or hide the saved result from the user.
+            self._controller.on_event(
+                {
+                    "type": "warning",
+                    "message": (
+                        "The output was saved, but QGIS could not add its "
+                        f"result layers automatically: {error}"
+                    ),
+                }
+            )
 
     def _build_task(self, state: Any) -> Any:
         from tree_counter.core.types import with_selected_classes
