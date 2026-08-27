@@ -15,11 +15,14 @@ transactional behaviour is tested.
 
 from __future__ import annotations
 
+import re
+from string import Formatter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from tree_counter.i18n import tr
+from tree_counter.runtime.manifest import RUNTIME_REASON_TEMPLATES
 from tree_counter.runtime.paths import RuntimeState
 
 DIALOG_OBJECT_NAME = "TreeCounterRuntimeManager"
@@ -41,6 +44,14 @@ ACTION_LABELS = {
     "verify": "Verify",
     "repair": "Repair",
     "remove": "Remove",
+}
+STATE_LABELS = {
+    RuntimeState.NOT_INSTALLED: "not installed",
+    RuntimeState.INSTALLING: "installing",
+    RuntimeState.READY: "ready",
+    RuntimeState.UPDATE_AVAILABLE: "update available",
+    RuntimeState.INCOMPATIBLE: "incompatible",
+    RuntimeState.REPAIR_REQUIRED: "repair required",
 }
 DESTRUCTIVE_ACTIONS = ("remove", "update", "repair")
 
@@ -104,46 +115,35 @@ def build_offers(catalog: Any, platform: str) -> tuple[ComponentOffer, ...]:
     return tuple(offers)
 
 
+def _reason_values(reason: str, template: str) -> dict[str, str] | None:
+    """Return placeholder values when *reason* matches *template*."""
+
+    pattern: list[str] = []
+    fields: list[str] = []
+    for literal, field_name, _format_spec, _conversion in Formatter().parse(
+        template
+    ):
+        pattern.append(re.escape(literal))
+        if field_name is not None:
+            fields.append(field_name)
+            pattern.append(f"(?P<{field_name}>.+?)")
+    match = re.fullmatch("".join(pattern), reason)
+    if match is None:
+        return None
+    return {field: match.group(field) for field in fields}
+
+
 def _translate_reason(reason: str, tr: Any) -> str:
     """Translate a runtime reason while preserving technical values."""
 
-    if reason == "The installed runtime was built for a different platform.":
-        return tr("The installed runtime was built for a different platform.")
-    if reason == "The host Python version is outside the supported range.":
-        return tr("The host Python version is outside the supported range.")
-    if reason == "The Python version changed since the runtime was installed.":
-        return tr(
-            "The Python version changed since the runtime was installed."
-        )
-    if reason == "Required runtime files are missing.":
-        return tr("Required runtime files are missing.")
-    if reason.startswith("The runtime contains unknown components: "):
-        components = reason.removeprefix(
-            "The runtime contains unknown components: "
-        )
-        return tr(
-            "The runtime contains unknown components: {components}."
-        ).format(components=components.removesuffix("."))
-    if reason.startswith("The runtime could not import "):
-        module = reason.removeprefix("The runtime could not import ")
-        return tr("The runtime could not import {module}.").format(
-            module=module.removesuffix(".")
-        )
-    if " no longer provides: " in reason:
-        component, accelerators = reason.split(
-            " no longer provides: ", maxsplit=1
-        )
-        return tr("{component} no longer provides: {accelerators}.").format(
-            component=component,
-            accelerators=accelerators.removesuffix("."),
-        )
-    if reason.startswith("A runtime update is available for: "):
-        components = reason.removeprefix(
-            "A runtime update is available for: "
-        )
-        return tr(
-            "A runtime update is available for: {components}."
-        ).format(components=components.removesuffix("."))
+    for template in RUNTIME_REASON_TEMPLATES.values():
+        if "{" not in template:
+            if reason == template:
+                return tr(template)
+            continue
+        values = _reason_values(reason, template)
+        if values is not None:
+            return tr(template).format(**values)
     return reason
 
 
@@ -152,7 +152,7 @@ def describe_status(status: Any, tr: Any = lambda text: text) -> str:
 
     lines = [
         tr("State: {state}").format(
-            state=status.state.value.replace("_", " ")
+            state=tr(STATE_LABELS[status.state])
         )
     ]
     manifest = getattr(status, "manifest", None)
@@ -340,8 +340,9 @@ class RuntimeManagerDialog:
         try:
             self._perform(action, offers)
         except Exception as error:
+            message = tr(getattr(error, "user_message", str(error)))
             self.status_label.setText(
-                f"{getattr(error, 'user_message', str(error))}\n"
+                f"{message}\n"
                 + tr("The previous runtime was kept.")
             )
             return False
@@ -413,6 +414,7 @@ __all__ = [
     "DIALOG_TITLE",
     "ComponentOffer",
     "RuntimeManagerDialog",
+    "STATE_LABELS",
     "available_actions",
     "build_offers",
     "confirmation_text",

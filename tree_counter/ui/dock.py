@@ -26,6 +26,7 @@ from tree_counter.constants import (
 from tree_counter.core.types import InferenceSettings
 from tree_counter.i18n import tr
 from tree_counter.qgis_adapter.scope import ScopeKind
+from tree_counter.runtime.paths import RuntimeState
 from tree_counter.ui.controller import CountingController, Phase
 from tree_counter.ui.widgets import (
     CollapsibleSection,
@@ -35,6 +36,7 @@ from tree_counter.ui.widgets import (
     make_int_control,
     set_class_items,
 )
+from tree_counter.ui.runtime_dialog import STATE_LABELS
 
 DOCK_OBJECT_NAME = "TreeCounterDock"
 DOCK_TITLE = "Tree Counter"
@@ -268,8 +270,12 @@ def render(dock: Any, state: Any) -> None:
     """Update every widget from a controller state."""
 
     parts = dock.tree_counter
+    try:
+        runtime_label = tr(STATE_LABELS[RuntimeState(state.runtime_state)])
+    except (KeyError, ValueError):
+        runtime_label = state.runtime_state
     parts["runtime_label"].setText(
-        tr("Runtime: {state}").format(state=state.runtime_state)
+        tr("Runtime: {state}").format(state=runtime_label)
     )
     parts["polygon_combo"].setEnabled(state.scope is ScopeKind.POLYGON)
 

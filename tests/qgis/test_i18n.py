@@ -23,14 +23,6 @@ RUNTIME_DIALOG_BODY_TEMPLATES = {
     "Location: {location}",
     "The installed runtime will be deleted.",
     "The existing runtime is kept until the new one is verified.",
-    "The installed runtime was built for a different platform.",
-    "The host Python version is outside the supported range.",
-    "The Python version changed since the runtime was installed.",
-    "Required runtime files are missing.",
-    "The runtime contains unknown components: {components}.",
-    "The runtime could not import {module}.",
-    "{component} no longer provides: {accelerators}.",
-    "A runtime update is available for: {components}.",
 }
 
 
@@ -160,7 +152,13 @@ def _visible_sources() -> set[str]:
     sources.update(
         _constant_strings(
             PACKAGE / "ui" / "runtime_dialog.py",
-            {"DIALOG_TITLE", "ACTION_LABELS"},
+            {"DIALOG_TITLE", "ACTION_LABELS", "STATE_LABELS"},
+        )
+    )
+    sources.update(
+        _constant_strings(
+            PACKAGE / "runtime" / "manifest.py",
+            {"RUNTIME_REASON_TEMPLATES"},
         )
     )
     return sources
@@ -186,6 +184,31 @@ def test_runtime_body_templates_are_collected() -> None:
     collected = set(_tr_literals(PACKAGE / "ui" / "runtime_dialog.py"))
 
     assert RUNTIME_DIALOG_BODY_TEMPLATES <= collected
+
+
+def test_every_runtime_state_is_checked_for_a_translation() -> None:
+    from tree_counter.runtime.paths import RuntimeState
+    from tree_counter.ui.runtime_dialog import STATE_LABELS
+
+    translations = _ts_translations()
+    assert set(STATE_LABELS) == set(RuntimeState)
+    missing = [
+        STATE_LABELS[state]
+        for state in RuntimeState
+        if not translations.get(STATE_LABELS[state])
+    ]
+
+    assert missing == []
+
+
+def test_runtime_reason_templates_are_collected_from_their_producer() -> None:
+    from tree_counter.runtime.manifest import RUNTIME_REASON_TEMPLATES
+
+    collected = _constant_strings(
+        PACKAGE / "runtime" / "manifest.py", {"RUNTIME_REASON_TEMPLATES"}
+    )
+
+    assert collected == set(RUNTIME_REASON_TEMPLATES.values())
 
 
 def test_a_missing_runtime_body_translation_is_reported() -> None:

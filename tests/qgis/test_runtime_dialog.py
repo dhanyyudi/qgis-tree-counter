@@ -121,6 +121,58 @@ def test_the_runtime_manager_translates_its_body_text(
         app.removeTranslator(translator)
 
 
+def test_the_runtime_manager_translates_every_state_value(
+    qgis_application, tmp_path: Path
+) -> None:
+    from qgis.PyQt.QtCore import QCoreApplication
+
+    from tree_counter.i18n import install_translator
+    from tree_counter.runtime.paths import RuntimeState
+
+    expected = {
+        RuntimeState.NOT_INSTALLED: "belum terpasang",
+        RuntimeState.INSTALLING: "sedang memasang",
+        RuntimeState.READY: "siap",
+        RuntimeState.UPDATE_AVAILABLE: "pembaruan tersedia",
+        RuntimeState.INCOMPATIBLE: "tidak kompatibel",
+        RuntimeState.REPAIR_REQUIRED: "perlu perbaikan",
+    }
+    app = QCoreApplication.instance()
+    translator = install_translator(app, locale="id_ID")
+    assert translator is not None
+    try:
+        for state, label in expected.items():
+            dialog, _ = _dialog(tmp_path / state.value, state)
+            assert dialog.status_label.text() == f"Status: {label}"
+    finally:
+        app.removeTranslator(translator)
+
+
+def test_a_failed_runtime_action_translates_both_failure_lines(
+    qgis_application, tmp_path: Path
+) -> None:
+    from qgis.PyQt.QtCore import QCoreApplication
+
+    from tree_counter.i18n import install_translator
+    from tree_counter.runtime.paths import RuntimeState
+
+    app = QCoreApplication.instance()
+    translator = install_translator(app, locale="id_ID")
+    assert translator is not None
+    try:
+        dialog, _ = _dialog(
+            tmp_path, RuntimeState.UPDATE_AVAILABLE, fail="update"
+        )
+
+        assert dialog.run_action("update") is False
+        text = dialog.status_label.text()
+        assert "Runtime yang terpasang tidak kompatibel." in text
+        assert "Runtime sebelumnya dipertahankan." in text
+        assert "The installed runtime is not compatible." not in text
+    finally:
+        app.removeTranslator(translator)
+
+
 def test_only_applicable_actions_are_enabled(
     qgis_application, tmp_path: Path
 ) -> None:

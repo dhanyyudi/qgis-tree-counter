@@ -278,6 +278,25 @@ def test_the_runtime_state_is_shown_in_the_header(dock) -> None:
     assert "ready" in dock.tree_counter["runtime_label"].text()
 
 
+def test_the_dock_translates_the_runtime_state_value(qgis_application) -> None:
+    from qgis.PyQt.QtCore import QCoreApplication
+
+    from tree_counter.i18n import install_translator
+    from tree_counter.ui.dock import build_dock
+
+    app = QCoreApplication.instance()
+    translator = install_translator(app, locale="id_ID")
+    assert translator is not None
+    dock = build_dock(_controller(runtime="repair_required"))
+    try:
+        assert dock.tree_counter["runtime_label"].text() == (
+            "Runtime: perlu perbaikan"
+        )
+    finally:
+        app.removeTranslator(translator)
+        dock.setParent(None)
+
+
 def test_the_output_checkboxes_update_the_controller(dock) -> None:
     parts = dock.tree_counter
     controller = parts["controller"]

@@ -236,6 +236,30 @@
         <translation>Status: {state}</translation>
     </message>
     <message>
+        <source>not installed</source>
+        <translation>belum terpasang</translation>
+    </message>
+    <message>
+        <source>installing</source>
+        <translation>sedang memasang</translation>
+    </message>
+    <message>
+        <source>ready</source>
+        <translation>siap</translation>
+    </message>
+    <message>
+        <source>update available</source>
+        <translation>pembaruan tersedia</translation>
+    </message>
+    <message>
+        <source>incompatible</source>
+        <translation>tidak kompatibel</translation>
+    </message>
+    <message>
+        <source>repair required</source>
+        <translation>perlu perbaikan</translation>
+    </message>
+    <message>
         <source>Python: {version}</source>
         <translation>Python: {version}</translation>
     </message>
