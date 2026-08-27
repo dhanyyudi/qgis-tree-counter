@@ -91,3 +91,88 @@ def test_plugin_installer_uses_a_real_qprocess_runner(
 
     assert isinstance(installer._runner, QProcessRunner)
     assert not hasattr(plugin, "_unavailable_runner")
+
+
+def test_a_crashed_process_is_reported_as_a_failure(
+    qgis_application,
+) -> None:
+    """A process killed by a signal must never look successful."""
+
+    from tree_counter.qgis_adapter.runtime_process import (
+        CRASH_RETURN_CODE,
+        QProcessRunner,
+    )
+
+    runner = QProcessRunner()
+    result = runner(
+        (
+            _supported_python(runner),
+            "-I",
+            "-c",
+            "import os; os.abort()",
+        ),
+        30.0,
+    )
+
+    assert result.returncode == CRASH_RETURN_CODE
+    assert "crash" in result.stderr
+
+
+def test_the_runner_keeps_the_event_loop_alive_while_waiting(
+    qgis_application,
+) -> None:
+    """A slow install must not freeze the QGIS user interface."""
+
+    from qgis.PyQt.QtCore import QTimer
+
+    from tree_counter.qgis_adapter.runtime_process import QProcessRunner
+
+    runner = QProcessRunner()
+    ticks: list[int] = []
+    timer = QTimer()
+    timer.setInterval(50)
+    timer.timeout.connect(lambda: ticks.append(1))
+    timer.start()
+    try:
+        result = runner(
+            (
+                _supported_python(runner),
+                "-I",
+                "-c",
+                "import time; time.sleep(1.5); print('slow-done')",
+            ),
+            30.0,
+        )
+    finally:
+        timer.stop()
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "slow-done"
+    assert ticks, "the runner blocked the event loop for the whole process"
+
+
+def test_the_selected_host_python_can_build_a_venv_from_inside_qgis(
+    qgis_application, tmp_path: Path
+) -> None:
+    """The exact command Install runs must work in QGIS's environment.
+
+    This is the regression guard for the release blocker where the plan
+    used ``sys.executable`` - the QGIS application binary - as the
+    interpreter, so Install could never build anything. Creating a venv
+    is offline, so this test never touches the network.
+    """
+
+    from tree_counter.qgis_adapter.runtime_process import QProcessRunner
+
+    runner = QProcessRunner()
+    interpreter = _supported_python(runner)
+    staging = tmp_path / "staging"
+
+    result = runner(
+        (interpreter, "-I", "-m", "venv", "--copies", str(staging)), 300.0
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (staging / "bin" / "python").exists() or (
+        staging / "Scripts" / "python.exe"
+    ).exists()

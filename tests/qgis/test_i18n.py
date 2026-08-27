@@ -161,6 +161,12 @@ def _visible_sources() -> set[str]:
             {"RUNTIME_REASON_TEMPLATES"},
         )
     )
+    sources.update(
+        _constant_strings(
+            PACKAGE / "runtime" / "installer.py",
+            {"RUNTIME_PROGRESS_MESSAGES"},
+        )
+    )
     return sources
 
 
@@ -209,6 +215,18 @@ def test_runtime_reason_templates_are_collected_from_their_producer() -> None:
     )
 
     assert collected == set(RUNTIME_REASON_TEMPLATES.values())
+
+
+def test_runtime_progress_messages_are_collected_from_their_producer(
+) -> None:
+    from tree_counter.runtime.installer import RUNTIME_PROGRESS_MESSAGES
+
+    collected = _constant_strings(
+        PACKAGE / "runtime" / "installer.py",
+        {"RUNTIME_PROGRESS_MESSAGES"},
+    )
+
+    assert collected == set(RUNTIME_PROGRESS_MESSAGES.values())
 
 
 def test_a_missing_runtime_body_translation_is_reported() -> None:

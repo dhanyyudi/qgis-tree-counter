@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from tree_counter.i18n import tr
+from tree_counter.runtime.installer import RUNTIME_PROGRESS_MESSAGES
 from tree_counter.runtime.manifest import RUNTIME_REASON_TEMPLATES
 from tree_counter.runtime.paths import RuntimeState
 
@@ -133,18 +134,39 @@ def _reason_values(reason: str, template: str) -> dict[str, str] | None:
     return {field: match.group(field) for field in fields}
 
 
+def _translate_template(text: str, templates: Any, tr: Any) -> str:
+    """Translate *text* through the first template that matches it.
+
+    The templates are the ones their producer actually emits, so a
+    reworded message cannot silently fall back to English without a test
+    noticing.
+    """
+
+    for template in templates:
+        if "{" not in template:
+            if text == template:
+                return tr(template)
+            continue
+        values = _reason_values(text, template)
+        if values is not None:
+            return tr(template).format(**values)
+    return text
+
+
 def _translate_reason(reason: str, tr: Any) -> str:
     """Translate a runtime reason while preserving technical values."""
 
-    for template in RUNTIME_REASON_TEMPLATES.values():
-        if "{" not in template:
-            if reason == template:
-                return tr(template)
-            continue
-        values = _reason_values(reason, template)
-        if values is not None:
-            return tr(template).format(**values)
-    return reason
+    return _translate_template(
+        reason, RUNTIME_REASON_TEMPLATES.values(), tr
+    )
+
+
+def translate_progress(message: str, tr: Any = lambda text: text) -> str:
+    """Translate one installer progress message for display."""
+
+    return _translate_template(
+        message, RUNTIME_PROGRESS_MESSAGES.values(), tr
+    )
 
 
 def describe_status(status: Any, tr: Any = lambda text: text) -> str:
@@ -271,6 +293,7 @@ class RuntimeManagerDialog:
         layout.addWidget(self.location_label)
         layout.addStretch(1)
 
+        self.progress_seen: list[str] = []
         self.buttons: dict[str, Any] = {}
         row = QtWidgets.QHBoxLayout()
         for action, label in ACTION_LABELS.items():
@@ -362,7 +385,25 @@ class RuntimeManagerDialog:
             self._installer.verify()
             return
         plan = self._plan(offers, action)
-        getattr(self._installer, action)(plan)
+        getattr(self._installer, action)(plan, self._report_progress)
+
+    def _report_progress(self, message: str, percent: int) -> None:
+        """Show what the installer is doing right now.
+
+        A runtime install downloads hundreds of megabytes. Without this
+        the dialog would sit unchanged for minutes and look exactly like
+        the failure it is meant to report.
+        """
+
+        text = translate_progress(message, tr)
+        self.progress_seen.append(text)
+        self.status_label.setText(f"{text} ({percent}%)")
+        from qgis.PyQt.QtCore import QCoreApplication, QEventLoop
+
+        if QCoreApplication.instance() is not None:
+            QCoreApplication.processEvents(
+                QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents
+            )
 
     def _plan(
         self, offers: tuple[ComponentOffer, ...], operation: str = "install"
@@ -417,6 +458,7 @@ __all__ = [
     "ComponentOffer",
     "RuntimeManagerDialog",
     "STATE_LABELS",
+    "translate_progress",
     "available_actions",
     "build_offers",
     "confirmation_text",

@@ -367,5 +367,21 @@
         <source>There are no runtime logs yet.</source>
         <translation>Belum ada log runtime.</translation>
     </message>
+    <message>
+        <source>Creating the runtime environment</source>
+        <translation>Menyiapkan lingkungan runtime</translation>
+    </message>
+    <message>
+        <source>Installing {title}</source>
+        <translation>Memasang {title}</translation>
+    </message>
+    <message>
+        <source>Verifying the runtime</source>
+        <translation>Memverifikasi runtime</translation>
+    </message>
+    <message>
+        <source>Activating the runtime</source>
+        <translation>Mengaktifkan runtime</translation>
+    </message>
 </context>
 </TS>

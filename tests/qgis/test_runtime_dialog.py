@@ -368,3 +368,53 @@ def test_open_logs_reports_when_there_are_none(
 
     assert dialog.open_logs() is False
     assert "no runtime logs" in dialog.status_label.text()
+
+
+class ProgressInstaller(FakeInstaller):
+    """An installer that reports progress the way the real one does."""
+
+    def install(self, plan, progress=None, should_cancel=None):
+        from tree_counter.runtime.installer import (
+            RUNTIME_PROGRESS_MESSAGES,
+        )
+
+        self._record("install")
+        if progress is not None:
+            progress(RUNTIME_PROGRESS_MESSAGES["creating"], 25)
+            progress(
+                RUNTIME_PROGRESS_MESSAGES["installing"].format(
+                    title="ONNX Runtime (CPU)"
+                ),
+                50,
+            )
+
+
+def test_the_dialog_shows_translated_progress_while_installing(
+    qgis_application, tmp_path: Path
+) -> None:
+    """A long install must show what it is doing, in the user's language."""
+
+    from qgis.PyQt.QtCore import QCoreApplication
+
+    from tree_counter.i18n import install_translator
+    from tree_counter.runtime.paths import RuntimeState
+    from tree_counter.ui.runtime_dialog import RuntimeManagerDialog
+
+    app = QCoreApplication.instance()
+    translator = install_translator(app, locale="id_ID")
+    assert translator is not None
+    seen: list[str] = []
+    try:
+        installer = ProgressInstaller(RuntimeState.NOT_INSTALLED, tmp_path)
+        dialog = RuntimeManagerDialog(
+            installer, confirm=lambda text: True, platform="macos-arm64"
+        )
+        dialog.progress_seen = seen
+        assert dialog.run_action("install") is True
+    finally:
+        app.removeTranslator(translator)
+
+    assert seen, "the dialog never reported progress"
+    assert "Menyiapkan lingkungan runtime" in seen[0]
+    assert "ONNX Runtime (CPU)" in seen[1]
+    assert "Installing" not in seen[1]

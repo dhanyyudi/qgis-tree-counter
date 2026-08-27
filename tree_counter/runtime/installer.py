@@ -126,6 +126,12 @@ class ProcessResult(NamedTuple):
     stderr: str
 
 
+RUNTIME_PROGRESS_MESSAGES = {
+    "creating": "Creating the runtime environment",
+    "installing": "Installing {title}",
+    "verifying": "Verifying the runtime",
+    "activating": "Activating the runtime",
+}
 Runner = Callable[[Sequence[str], float], ProcessResult]
 Progress = Callable[[str, int], None]
 ShouldCancel = Callable[[], bool]
@@ -510,7 +516,7 @@ class RuntimeInstaller:
             self._guard(should_cancel)
             step += 1
             progress(
-                "Creating the runtime environment",
+                RUNTIME_PROGRESS_MESSAGES["creating"],
                 self._percent(step, total_steps),
             )
             self._create_venv(plan, staging)
@@ -519,7 +525,9 @@ class RuntimeInstaller:
                 self._guard(should_cancel)
                 step += 1
                 progress(
-                    f"Installing {self._catalog.components[component].title}",
+                    RUNTIME_PROGRESS_MESSAGES["installing"].format(
+                        title=self._catalog.components[component].title
+                    ),
                     self._percent(step, total_steps),
                 )
                 self._pip_install(
@@ -528,7 +536,10 @@ class RuntimeInstaller:
 
             self._guard(should_cancel)
             step += 1
-            progress("Verifying the runtime", self._percent(step, total_steps))
+            progress(
+                RUNTIME_PROGRESS_MESSAGES["verifying"],
+                self._percent(step, total_steps),
+            )
             modules = self._modules_for(plan.components)
             report = self._self_check(staging, modules)
 
@@ -540,7 +551,7 @@ class RuntimeInstaller:
 
             self._guard(should_cancel)
             step += 1
-            progress("Activating the runtime", 100)
+            progress(RUNTIME_PROGRESS_MESSAGES["activating"], 100)
             self._activate(staging)
         except InstallCancelled:
             self._log.append(f"{operation} cancelled")
@@ -956,6 +967,7 @@ __all__ = [
     "InstallError",
     "InstallPlan",
     "ProcessResult",
+    "RUNTIME_PROGRESS_MESSAGES",
     "RuntimeInstaller",
     "RuntimeStatus",
     "redact",
