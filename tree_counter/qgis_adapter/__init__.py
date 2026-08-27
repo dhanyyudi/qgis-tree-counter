@@ -1,7 +1,7 @@
 """QGIS-facing adapters. Every QGIS import in the plugin lives here.
 
 The plugin entry point must never import ``qgis.core`` itself: the
-foundation gate checks that ``plugin.py`` only reaches Qt through
+publication gate checks that ``plugin.py`` only reaches Qt through
 ``qgis.PyQt``. The two host services the plugin needs but cannot import
 are exposed here, with their QGIS imports deferred into the call.
 """

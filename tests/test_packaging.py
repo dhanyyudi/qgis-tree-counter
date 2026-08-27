@@ -56,6 +56,17 @@ def test_build_package_preserves_source_bytes_and_is_deterministic(
             assert handle.read(info.filename) == source.read_bytes()
 
 
+def test_build_package_ships_the_dependency_notices(tmp_path: Path) -> None:
+    from scripts.package_plugin import build_package
+
+    archive = build_package(ROOT, tmp_path / "tree-counter.zip")
+
+    with zipfile.ZipFile(archive) as handle:
+        packaged = handle.read("tree_counter/THIRD_PARTY_NOTICES.md")
+
+    assert packaged == (ROOT / "THIRD_PARTY_NOTICES.md").read_bytes()
+
+
 @pytest.mark.parametrize(
     "relative_path",
     [
@@ -115,7 +126,7 @@ def test_build_package_rejects_missing_mandatory_files(tmp_path: Path) -> None:
         "native.tar.gz",
     ],
 )
-def test_build_package_rejects_any_file_outside_foundation_manifest(
+def test_build_package_rejects_any_file_outside_release_manifest(
     tmp_path: Path, relative_path: str
 ) -> None:
     from scripts.package_plugin import build_package

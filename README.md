@@ -23,8 +23,10 @@ but its accuracy on your data is your call to make — see
 
 ## Installing
 
-Install the plugin from the QGIS plugin repository, or from a ZIP through
-**Plugins → Manage and Install Plugins → Install from ZIP**.
+For the v0.1.0 release candidate, install the validated ZIP through
+**Plugins → Manage and Install Plugins → Install from ZIP**. After the first
+version is approved, the same package will also be available from the official
+QGIS Plugin Repository.
 
 Then open **Runtime Manager** in the Tree Counter panel and press
 **Install**. This is the one action that uses the network: it downloads
@@ -98,15 +100,19 @@ Results are written to one GeoPackage containing:
 - `run_summary` — what was run: model hash, settings, backend, device,
   tile count, duration, and any warnings.
 
-You choose which layers to write. The run refuses to start if you turn
-both off, rather than producing a file with no detections in it.
+You choose which layers to write. The requested result layers are added to the
+current QGIS project automatically after a successful run. The run refuses to
+start if you turn both off, rather than producing a file with no detections in
+it.
 
 ## Devices
 
-CPU is the baseline and always works. Where the hardware and the installed
-component support it, CUDA, MPS (Apple Silicon) and CoreML are offered.
-The device actually used is recorded in `run_summary`, so a run is never
-ambiguous after the fact.
+CPU is the baseline and is available on every supported runtime profile. The
+current Apple Silicon profiles can additionally offer MPS for trusted `.pt`
+models and CoreML for compatible ONNX models. CUDA is shown only when a future
+verified CUDA runtime profile is installed; v0.1.0 does not ship one. The
+device actually used is recorded in `run_summary`, so a run is never ambiguous
+after the fact.
 
 ## Limitations
 

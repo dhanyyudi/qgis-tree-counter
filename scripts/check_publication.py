@@ -25,6 +25,7 @@ PACKAGE_NAME = "tree_counter"
 # same change that adds a distributable package file.
 PACKAGE_MANIFEST = (
     "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "__init__.py",
     "compat.py",
     "constants.py",
@@ -239,7 +240,7 @@ def _metadata_errors(values: configparser.SectionProxy) -> list[str]:
         actual = values.get(key, "").strip()
         if actual != expected:
             errors.append(
-                f"metadata {key} must equal the locked foundation value"
+                f"metadata {key} must equal the locked release value"
             )
     for phrase, message in REQUIRED_ABOUT_DISCLOSURES:
         if phrase not in about:
@@ -297,7 +298,7 @@ def _manifest_error(relative: str) -> str | None:
     expected = {name.casefold() for name in PACKAGE_MANIFEST}
     if relative.casefold() not in expected or relative not in PACKAGE_MANIFEST:
         return (
-            "package file is not allowed by the foundation manifest: "
+            "package file is not allowed by the release manifest: "
             f"{PACKAGE_NAME}/{relative}"
         )
     return None
@@ -353,6 +354,7 @@ def validate_source(repo_root: Path) -> list[str]:
         errors.extend(_metadata_errors(values))
 
     notices = root / "THIRD_PARTY_NOTICES.md"
+    package_notices = package / "THIRD_PARTY_NOTICES.md"
     if not notices.is_file():
         errors.append("missing dependency disclosure: THIRD_PARTY_NOTICES.md")
     else:
@@ -366,6 +368,14 @@ def validate_source(repo_root: Path) -> list[str]:
                 errors.append(
                     f"dependency disclosure is missing: {dependency}"
                 )
+        if package_notices.is_file():
+            try:
+                if notices.read_bytes() != package_notices.read_bytes():
+                    errors.append(
+                        "root and packaged THIRD_PARTY_NOTICES.md differ"
+                    )
+            except OSError as exc:
+                errors.append(f"dependency notices cannot be compared: {exc}")
 
     seen_paths: dict[str, str] = {}
     for path in sorted(package.rglob("*")):
@@ -515,7 +525,7 @@ def validate_archive(archive_path: Path) -> list[str]:
                     )
                 if required.casefold() not in canonical_package_names:
                     errors.append(
-                        "archive missing foundation manifest file: "
+                        "archive missing release manifest file: "
                         f"{PACKAGE_NAME}/{required}"
                     )
 
