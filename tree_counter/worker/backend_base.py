@@ -47,6 +47,7 @@ class ModelDescription:
     input_height: int
     dynamic_shape: bool
     backend: str
+    provider: str
     device: str
     warnings: tuple[str, ...] = field(default=())
 
@@ -62,6 +63,11 @@ class ModelDescription:
             raise ModelRejected("the model declares no classes")
         if "/" in self.filename or "\\" in self.filename:
             raise ModelRejected("filename must not contain a path")
+        for field_name in ("sha256", "backend", "provider", "device"):
+            if not isinstance(getattr(self, field_name), str) or not getattr(
+                self, field_name
+            ):
+                raise ModelRejected(f"{field_name} must be non-empty")
 
     @property
     def is_single_class(self) -> bool:
@@ -73,12 +79,20 @@ class ModelDescription:
         """Return the protocol payload for a ``model_info`` message."""
 
         payload: dict[str, Any] = {
+            "filename": self.filename,
+            "sha256": self.sha256,
+            "model_format": self.model_format,
+            "task": self.task,
+            "family": self.family,
             "class_names": list(self.class_names),
+            "input_width": self.input_width,
+            "input_height": self.input_height,
+            "dynamic_shape": self.dynamic_shape,
             "backend": self.backend,
+            "provider": self.provider,
             "device": self.device,
+            "warnings": list(self.warnings),
         }
-        if not self.dynamic_shape:
-            payload["input_size"] = self.input_width
         return payload
 
 

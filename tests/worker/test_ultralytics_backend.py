@@ -360,6 +360,7 @@ class TestRun:
 
         assert result["device"] == "cpu"
         assert result["backend"] == "ultralytics"
+        assert result["provider"] == "torch"
 
     def test_the_module_is_moved_and_set_to_eval(
         self, fake_runtime, tmp_path: Path

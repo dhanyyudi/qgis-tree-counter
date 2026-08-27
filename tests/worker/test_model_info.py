@@ -256,6 +256,7 @@ class TestModelDescription:
             "input_height": 640,
             "dynamic_shape": False,
             "backend": "onnxruntime",
+            "provider": "CPUExecutionProvider",
             "device": "cpu",
         }
         values.update(overrides)
@@ -297,17 +298,29 @@ class TestModelDescription:
         payload = self._description().as_message()
 
         assert set(payload) == {
+            "filename",
+            "sha256",
+            "model_format",
+            "task",
+            "family",
             "class_names",
+            "input_width",
+            "input_height",
+            "dynamic_shape",
             "backend",
+            "provider",
             "device",
-            "input_size",
+            "warnings",
         }
-        assert payload["input_size"] == 640
+        assert payload["filename"] == "best.onnx"
+        assert payload["sha256"] == "a" * 64
+        assert payload["input_width"] == 640
 
     def test_a_dynamic_model_reports_no_input_size(self) -> None:
         payload = self._description(dynamic_shape=True).as_message()
 
-        assert "input_size" not in payload
+        assert payload["dynamic_shape"] is True
+        assert payload["input_width"] == 640
 
 
 def test_a_raw_detection_maps_to_its_class_name() -> None:

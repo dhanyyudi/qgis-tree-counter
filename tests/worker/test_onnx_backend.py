@@ -24,9 +24,12 @@ class FakeMeta:
 
 
 class FakeIO:
-    def __init__(self, name: str, shape: list) -> None:
+    def __init__(
+        self, name: str, shape: list, data_type: str = "tensor(float)"
+    ) -> None:
         self.name = name
         self.shape = shape
+        self.type = data_type
 
 
 class FakeSession:
@@ -38,6 +41,8 @@ class FakeSession:
         input_shape=None,
         output_shape=None,
         output_names=("output0",),
+        input_type="tensor(float)",
+        output_type="tensor(float)",
         result=None,
     ) -> None:
         self.path = path
@@ -48,10 +53,10 @@ class FakeSession:
             "description": "Ultralytics YOLO11n model",
         }
         self._inputs = [
-            FakeIO("images", input_shape or [1, 3, 640, 640])
+            FakeIO("images", input_shape or [1, 3, 640, 640], input_type)
         ]
         self._outputs = [
-            FakeIO(name, output_shape or [1, 5, 8400])
+            FakeIO(name, output_shape or [1, 5, 8400], output_type)
             for name in output_names
         ]
         self._result = result
@@ -183,6 +188,26 @@ def test_an_embedded_nms_export_is_rejected(
         _backend().inspect(str(_model(tmp_path)), "a" * 64)
 
 
+@pytest.mark.parametrize("input_type, output_type", [
+    ("tensor(float16)", "tensor(float)"),
+    ("tensor(float)", "tensor(float16)"),
+    ("tensor(int8)", "tensor(float)"),
+])
+def test_non_float_model_tensors_are_rejected(
+    fake_onnxruntime,
+    tmp_path: Path,
+    input_type: str,
+    output_type: str,
+) -> None:
+    from tree_counter.worker.backend_base import ModelRejected
+
+    fake_onnxruntime["kwargs"].update(
+        input_type=input_type, output_type=output_type
+    )
+    with pytest.raises(ModelRejected):
+        _backend().inspect(str(_model(tmp_path)), "a" * 64)
+
+
 def test_an_ambiguous_output_layout_is_rejected(
     fake_onnxruntime, tmp_path: Path
 ) -> None:
@@ -230,6 +255,32 @@ def test_a_multi_input_model_is_rejected(
         _backend().inspect(str(_model(tmp_path)), "a" * 64)
 
 
+@pytest.mark.parametrize(
+    "input_shape",
+    ([1, 1, 640, 640], [2, 3, 640, 640]),
+)
+def test_non_rgb_or_non_single_batch_input_is_rejected(
+    fake_onnxruntime, tmp_path: Path, input_shape: list
+) -> None:
+    from tree_counter.worker.backend_base import ModelRejected
+
+    fake_onnxruntime["kwargs"]["input_shape"] = input_shape
+    with pytest.raises(ModelRejected):
+        _backend().inspect(str(_model(tmp_path)), "a" * 64)
+
+
+def test_dynamic_batch_and_spatial_input_is_accepted(
+    fake_onnxruntime, tmp_path: Path
+) -> None:
+    fake_onnxruntime["kwargs"]["input_shape"] = [
+        "batch", 3, "height", "width"
+    ]
+
+    description = _backend().inspect(str(_model(tmp_path)), "a" * 64)
+
+    assert description.dynamic_shape is True
+
+
 class TestProviders:
     """Provider selection follows the device rules exactly."""
 
@@ -247,6 +298,7 @@ class TestProviders:
         )
 
         assert result["device"] == "cpu"
+        assert result["provider"] == "CPUExecutionProvider"
         assert fake_onnxruntime["session"].providers == [
             "CPUExecutionProvider"
         ]
@@ -281,6 +333,7 @@ class TestProviders:
         )
 
         assert result["device"] == "coreml"
+        assert result["provider"] == "CoreMLExecutionProvider"
         assert fake_onnxruntime["session"].providers == [
             "CoreMLExecutionProvider",
             "CPUExecutionProvider",

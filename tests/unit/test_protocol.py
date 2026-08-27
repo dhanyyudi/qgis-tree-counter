@@ -47,6 +47,7 @@ def _tile(tile_path: str = "tile_r00000_c00000.png") -> dict[str, object]:
         "run_id": "run-1",
         "tile_id": "r00000_c00000",
         "tile_path": tile_path,
+        "tile_encoding": "rgb8",
         "x_offset": 0,
         "y_offset": 0,
         "valid_width": 640,
@@ -82,15 +83,26 @@ WORKER_MESSAGES: tuple[dict[str, object], ...] = (
         "type": "model_info",
         "protocol_version": 1,
         "request_id": "req-1",
+        "filename": "best.onnx",
+        "sha256": "a" * 64,
+        "model_format": "onnx",
+        "task": "detect",
+        "family": "yolo11",
         "class_names": ["oil_palm"],
+        "input_width": 640,
+        "input_height": 640,
+        "dynamic_shape": False,
         "backend": "fake",
+        "provider": "fake",
         "device": "cpu",
+        "warnings": [],
     },
     {
         "type": "run_started",
         "protocol_version": 1,
         "request_id": "req-2",
         "run_id": "run-1",
+        "warnings": [],
     },
     {
         "type": "tile_completed",
@@ -431,6 +443,24 @@ def test_validation_accepts_a_nested_relative_tile_path() -> None:
     from tree_counter.core.protocol import validate_host_message
 
     validate_host_message(_tile("tiles/tile_r00000_c00000.png"))
+
+
+def test_validation_rejects_an_unsupported_tile_encoding() -> None:
+    from tree_counter.core.protocol import ProtocolError, validate_host_message
+
+    message = _tile()
+    message["tile_encoding"] = "png"
+    with pytest.raises(ProtocolError):
+        validate_host_message(message)
+
+
+def test_validation_requires_explicit_rgb8_tile_encoding() -> None:
+    from tree_counter.core.protocol import ProtocolError, validate_host_message
+
+    message = _tile()
+    del message["tile_encoding"]
+    with pytest.raises(ProtocolError):
+        validate_host_message(message)
 
 
 def test_validation_rejects_negative_tile_geometry() -> None:

@@ -94,14 +94,33 @@ def _input_shape(session: Any) -> tuple[int | None, int | None, bool]:
         raise ModelRejected(
             f"expected one model input, found {len(inputs)}"
         )
+    _require_float_tensor(inputs[0].type, "input")
     shape = list(inputs[0].shape)
     if len(shape) != 4:
         raise ModelRejected(f"unsupported input shape: {shape}")
+    batch, channels = shape[0], shape[1]
+    if isinstance(batch, int) and batch != 1:
+        raise ModelRejected(
+            f"unsupported batch dimension: expected 1 or dynamic, found "
+            f"{batch}"
+        )
+    if channels != 3:
+        raise ModelRejected(
+            "unsupported channel dimension: expected RGB with 3 channels"
+        )
     height, width = shape[2], shape[3]
     dynamic = not isinstance(height, int) or not isinstance(width, int)
     if dynamic:
         return (None, None, True)
     return (int(width), int(height), False)
+
+
+def _require_float_tensor(data_type: object, role: str) -> None:
+    if data_type != "tensor(float)":
+        raise ModelRejected(
+            f"unsupported {role} dtype: expected tensor(float), found "
+            f"{data_type!r}"
+        )
 
 
 class OnnxBackend:
@@ -158,6 +177,11 @@ class OnnxBackend:
         class_names = parse_class_map(_decode_names(metadata.get("names")))
 
         outputs = session.get_outputs()
+        if len(outputs) != 1:
+            raise ModelRejected(
+                f"expected one raw detection output, found {len(outputs)}"
+            )
+        _require_float_tensor(outputs[0].type, "output")
         reject_embedded_nms([item.name for item in outputs])
         layout = describe_output_layout(
             list(outputs[0].shape), len(class_names)
@@ -175,6 +199,7 @@ class OnnxBackend:
             input_height=height or 0,
             dynamic_shape=dynamic,
             backend=self.name,
+            provider=DEVICE_PROVIDERS.get(resolved_device, resolved_device),
             device=resolved_device,
             warnings=tuple(warnings),
         )
@@ -236,6 +261,7 @@ class OnnxBackend:
         self._confidence = float(getattr(settings, "confidence", 0.25))
         return {
             "backend": self.name,
+            "provider": description.provider,
             "device": selection.device,
             "warnings": list(selection.warnings),
         }

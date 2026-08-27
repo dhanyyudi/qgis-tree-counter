@@ -210,6 +210,7 @@ class UltralyticsBackend:
             input_height=input_size,
             dynamic_shape=True,
             backend=self.name,
+            provider="torch",
             device=device,
             warnings=tuple(warnings),
         )
@@ -280,6 +281,7 @@ class UltralyticsBackend:
         self._layout = None
         return {
             "backend": self.name,
+            "provider": description.provider,
             "device": selection.device,
             "warnings": list(selection.warnings),
         }

@@ -127,6 +127,7 @@ def test_a_run_records_the_resolved_device_not_the_request() -> None:
         input_height=640,
         dynamic_shape=False,
         backend="onnxruntime",
+        provider="CoreMLExecutionProvider",
         device=selection.device,
     )
 

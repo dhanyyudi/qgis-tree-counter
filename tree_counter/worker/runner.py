@@ -33,6 +33,7 @@ from tree_counter.core.protocol import (
 )
 from tree_counter.core.types import Detection, InferenceSettings, PixelBox
 from tree_counter.errors import ErrorCode, TreeCounterError
+from tree_counter.worker.backend_base import ModelDescription
 
 WriteLine = Callable[[bytes], None]
 Log = Callable[[str], None]
@@ -71,17 +72,18 @@ def _build_backend(name: str) -> Any:
 
 
 class SelectingBackend:
-    """Chooses the real backend from the model's format on first use.
+    """Chooses the real backend from the model's format on each idle use.
 
     The worker is started before the model is known, so the concrete
     backend is resolved from the file suffix at the first call and reused
-    for the rest of the session.
+    while reusing it for repeated calls for the same model format.
     """
 
     name = "auto"
 
     def __init__(self) -> None:
         self._backend: Any = None
+        self._chosen_suffix: str | None = None
 
     def _for(self, model_path: str) -> Any:
         suffix = Path(model_path).suffix.casefold()
@@ -90,8 +92,11 @@ class SelectingBackend:
                 f"no backend handles {suffix!r} models"
             )
         chosen = SUFFIX_BACKENDS[suffix]
-        if self._backend is None:
+        if self._backend is None or self._chosen_suffix != suffix:
+            if self._backend is not None:
+                self._backend.close()
             self._backend = _build_backend(chosen)
+            self._chosen_suffix = suffix
             self.name = getattr(self._backend, "name", chosen)
         return self._backend
 
@@ -130,6 +135,7 @@ class SelectingBackend:
 
         backend = self._backend
         self._backend = None
+        self._chosen_suffix = None
         if backend is not None:
             backend.close()
 
@@ -339,16 +345,16 @@ class WorkerRunner:
         info = backend.inspect(
             str(message["model_path"]), str(message["model_sha256"])
         )
+        if not isinstance(info, ModelDescription):
+            raise ProtocolError(
+                "backend inspect did not return ModelDescription"
+            )
         payload: dict[str, object] = {
             "type": "model_info",
             "protocol_version": PROTOCOL_VERSION,
             "request_id": message["request_id"],
-            "class_names": list(info["class_names"]),
-            "backend": str(info["backend"]),
-            "device": str(info["device"]),
+            **info.as_message(),
         }
-        if info.get("input_size") is not None:
-            payload["input_size"] = int(info["input_size"])
         self._send(payload)
 
     def _on_start_run(self, message: Mapping[str, object]) -> None:
@@ -380,9 +386,13 @@ class WorkerRunner:
             "run_id": self._run_id,
         }
         if isinstance(started, Mapping):
-            for key in ("backend", "device"):
+            for key in ("backend", "provider", "device"):
                 if started.get(key) is not None:
                     payload[key] = str(started[key])
+            if started.get("warnings") is not None:
+                payload["warnings"] = list(started["warnings"])
+        else:
+            payload["warnings"] = []
         self._send(payload)
 
     @staticmethod
@@ -432,6 +442,8 @@ class WorkerRunner:
 
     def _on_tile(self, message: Mapping[str, object]) -> None:
         settings = self._require_run(message)
+        if self._completed_tiles >= self._total_tiles:
+            raise ProtocolError("received more tiles than announced")
         tile_id = str(message["tile_id"])
         path = self._resolve_tile_path(str(message["tile_path"]))
         backend = self._ensure_backend()
@@ -533,18 +545,9 @@ class WorkerRunner:
     def _on_finish_tiles(self, message: Mapping[str, object]) -> None:
         settings = self._require_run(message)
         if self._completed_tiles != self._total_tiles:
-            self._send(
-                {
-                    "type": "warning",
-                    "protocol_version": PROTOCOL_VERSION,
-                    "request_id": message["request_id"],
-                    "run_id": self._run_id,
-                    "code": "tile_count_mismatch",
-                    "message": (
-                        "The number of processed tiles did not match the "
-                        "announced tile count."
-                    ),
-                }
+            raise ProtocolError(
+                "the number of processed tiles does not match the "
+                "announced tile count"
             )
         final = deduplicate_detections(
             self._detections, settings.duplicate_iou
