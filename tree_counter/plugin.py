@@ -149,8 +149,11 @@ class TreeCounterPlugin:
     def _inspect_model(self, identity: Any) -> dict:
         """Inspect a model in the isolated worker and return its info.
 
-        The channel is always closed, so a rejection or a crash can never
-        leave a worker process behind.
+        A worker that rejects the model answers with an ``error`` message;
+        its code and message are surfaced verbatim instead of being
+        collapsed into a generic "no classes" reply. The channel is always
+        closed, so a rejection or a crash can never leave a worker process
+        behind.
         """
 
         from tree_counter.constants import PROTOCOL_VERSION
@@ -175,7 +178,7 @@ class TreeCounterPlugin:
                     "request_id": "hello",
                 }
             )
-            channel.receive()
+            self._expect(channel.receive(), "hello")
             channel.send(
                 {
                     "type": "inspect_model",
@@ -185,9 +188,33 @@ class TreeCounterPlugin:
                     "model_sha256": identity.sha256,
                 }
             )
-            return dict(channel.receive())
+            return self._expect(channel.receive(), "model_info")
         finally:
             channel.close()
+
+    @staticmethod
+    def _expect(message: Any, wanted: str) -> dict:
+        """Return a worker reply of the expected type, or raise its error."""
+
+        kind = str(message.get("type", ""))
+        if kind == "error":
+            code = str(message.get("code", ""))
+            try:
+                error_code = ErrorCode(code)
+            except ValueError:
+                error_code = ErrorCode.WORKER_PROTOCOL_FAILURE
+            raise TreeCounterError(
+                error_code,
+                user_message=str(message.get("message") or ""),
+            )
+        if kind != wanted:
+            raise TreeCounterError(
+                ErrorCode.WORKER_PROTOCOL_FAILURE,
+                diagnostic_detail=(
+                    f"expected {wanted!r}, the worker sent {kind!r}"
+                ),
+            )
+        return dict(message)
 
     def _installer(self) -> Any:
         from tree_counter.runtime.installer import RuntimeInstaller
