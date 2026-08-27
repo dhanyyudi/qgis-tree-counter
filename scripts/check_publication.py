@@ -40,6 +40,8 @@ PACKAGE_MANIFEST = (
     "metadata.txt",
     "plugin.py",
     "qgis_adapter/__init__.py",
+    "qgis_adapter/georeference.py",
+    "qgis_adapter/output.py",
     "qgis_adapter/process.py",
     "qgis_adapter/raster.py",
     "qgis_adapter/scope.py",
