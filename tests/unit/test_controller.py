@@ -418,6 +418,40 @@ def test_listeners_render_every_change() -> None:
     assert seen[-1].raster_name == "aerial"
 
 
+class TestOutputLayers:
+    """At least one detection layer must be requested."""
+
+    def test_the_flags_default_to_centres_only(self) -> None:
+        controller = _controller()
+
+        assert controller.state.write_centers is True
+        assert controller.state.write_boxes is False
+
+    def test_the_flags_update_together(self) -> None:
+        controller = _controller()
+
+        controller.set_output_layers(False, True)
+
+        assert controller.state.write_centers is False
+        assert controller.state.write_boxes is True
+
+    def test_neither_layer_blocks_start(self) -> None:
+        controller = _controller()
+        _ready(controller)
+
+        state = controller.set_output_layers(False, False)
+
+        assert state.can_start is False
+
+    def test_boxes_alone_keeps_start_enabled(self) -> None:
+        controller = _controller()
+        _ready(controller)
+
+        state = controller.set_output_layers(False, True)
+
+        assert state.can_start is True
+
+
 def test_the_controller_imports_no_qt() -> None:
     from pathlib import Path
 

@@ -133,3 +133,31 @@ def test_the_runtime_status_never_raises(plugin) -> None:
 
     # A machine with no runtime must still open the dock.
     assert isinstance(instance._runtime_status(), str)
+
+
+def test_the_output_request_honours_the_chosen_layers(
+    qgis_application, tmp_path
+) -> None:
+    from tree_counter.plugin import TreeCounterPlugin
+    from tree_counter.ui.controller import ViewState
+
+    instance = TreeCounterPlugin(None)
+
+    class FakeRaster:
+        def source(self):
+            return "/data/aerial.tif"
+
+        def name(self):
+            return "aerial"
+
+    state = ViewState(
+        output_path=str(tmp_path),
+        write_centers=False,
+        write_boxes=True,
+    )
+
+    request = instance._output_request(state, FakeRaster())
+
+    assert request.write_centers is False
+    assert request.write_boxes is True
+    assert request.directory == tmp_path

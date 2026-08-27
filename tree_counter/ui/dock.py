@@ -236,6 +236,12 @@ def _wire(
         else:
             controller.start()
 
+    def on_output_layers() -> None:
+        controller.set_output_layers(
+            parts["write_centers"].isChecked(),
+            parts["write_boxes"].isChecked(),
+        )
+
     parts["raster_combo"].currentTextChanged.connect(controller.set_raster)
     parts["scope_combo"].currentIndexChanged.connect(on_scope)
     parts["polygon_combo"].currentTextChanged.connect(
@@ -248,6 +254,8 @@ def _wire(
         parts[control].valueChanged.connect(lambda _v: on_settings())
     parts["device"].currentTextChanged.connect(lambda _t: on_settings())
     parts["output_path"].textChanged.connect(controller.set_output_path)
+    parts["write_centers"].toggled.connect(lambda _c: on_output_layers())
+    parts["write_boxes"].toggled.connect(lambda _c: on_output_layers())
     parts["primary"].clicked.connect(on_primary)
     parts["trust_button"].clicked.connect(controller.confirm_trust)
     if open_runtime is not None:

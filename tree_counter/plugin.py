@@ -286,10 +286,6 @@ class TreeCounterPlugin:
 
     def _build_task(self, state: Any) -> Any:
         from tree_counter.core.types import with_selected_classes
-        from tree_counter.qgis_adapter.output import (
-            OutputRequest,
-            output_timestamp,
-        )
         from tree_counter.qgis_adapter.process import (
             QProcessTransport,
             WorkerChannel,
@@ -313,11 +309,7 @@ class TreeCounterPlugin:
             model_path=str(self._model_path or ""),
             model_sha256=state.model.sha256,
         )
-        output_request = OutputRequest(
-            directory=self._output_directory(state),
-            raster_stem=self._raster_stem(raster),
-            timestamp=output_timestamp(),
-        )
+        output_request = self._output_request(state, raster)
         command = self._worker_command()
         return CountingTask(
             description=f"Count trees in {state.raster_name}",
@@ -370,6 +362,20 @@ class TreeCounterPlugin:
         if path.suffix.casefold() == ".gpkg":
             return path.parent
         return path
+
+    def _output_request(self, state: Any, raster: Any) -> Any:
+        from tree_counter.qgis_adapter.output import (
+            OutputRequest,
+            output_timestamp,
+        )
+
+        return OutputRequest(
+            directory=self._output_directory(state),
+            raster_stem=self._raster_stem(raster),
+            write_centers=bool(state.write_centers),
+            write_boxes=bool(state.write_boxes),
+            timestamp=output_timestamp(),
+        )
 
     @staticmethod
     def _raster_stem(raster: Any) -> str:

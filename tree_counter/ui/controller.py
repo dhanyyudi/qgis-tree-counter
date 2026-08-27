@@ -72,6 +72,8 @@ class ViewState:
     settings: InferenceSettings = field(default_factory=InferenceSettings)
     runtime_state: str = "not_installed"
     output_path: str = ""
+    write_centers: bool = True
+    write_boxes: bool = False
     completed_tiles: int = 0
     total_tiles: int = 0
     warnings: tuple[str, ...] = ()
@@ -101,6 +103,8 @@ class ViewState:
         if self.runtime_state != "ready":
             return False
         if self.scope is ScopeKind.POLYGON and not self.polygon_layer_name:
+            return False
+        if not (self.write_centers or self.write_boxes):
             return False
         return bool(self.output_path)
 
@@ -193,6 +197,16 @@ class CountingController:
         """Choose where results are written."""
 
         return self._update(output_path=str(path or ""))
+
+    def set_output_layers(
+        self, write_centers: bool, write_boxes: bool
+    ) -> ViewState:
+        """Choose which detection layers are written."""
+
+        return self._update(
+            write_centers=bool(write_centers),
+            write_boxes=bool(write_boxes),
+        )
 
     def refresh_runtime(self) -> ViewState:
         """Re-read the runtime state without changing it."""
