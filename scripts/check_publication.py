@@ -37,14 +37,18 @@ PACKAGE_MANIFEST = (
     "core/types.py",
     "core/validation.py",
     "errors.py",
+    "i18n/__init__.py",
+    "i18n/tree_counter_id.qm",
     "icons/tree_counter.svg",
     "metadata.txt",
     "plugin.py",
     "qgis_adapter/__init__.py",
     "qgis_adapter/georeference.py",
+    "qgis_adapter/launcher.py",
     "qgis_adapter/output.py",
     "qgis_adapter/process.py",
     "qgis_adapter/raster.py",
+    "qgis_adapter/runtime_process.py",
     "qgis_adapter/scope.py",
     "qgis_adapter/task.py",
     "qgis_adapter/workspace.py",
@@ -83,6 +87,12 @@ PACKAGE_MANIFEST = (
     "worker/yolo_postprocess.py",
 )
 MANDATORY_FILES = PACKAGE_MANIFEST
+# Source files that live in the package tree for development but are never
+# shipped. The hand-maintained Qt Linguist source stays out of the archive;
+# only its compiled .qm is a distributable asset.
+SOURCE_ONLY_FILES = {
+    "i18n/tree_counter_id.ts",
+}
 EXPECTED_METADATA = {
     "name": "Tree Counter",
     "description": (
@@ -355,7 +365,7 @@ def validate_source(repo_root: Path) -> list[str]:
         if forbidden:
             errors.append(forbidden)
         manifest_error = _manifest_error(relative_path)
-        if manifest_error:
+        if manifest_error and relative_path not in SOURCE_ONLY_FILES:
             errors.append(manifest_error)
         try:
             content_error = _content_error(relative_path, path.read_bytes())

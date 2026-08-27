@@ -16,6 +16,8 @@ class ErrorCode(str, Enum):
     INVALID_SETTINGS = "invalid_settings"
     MISSING_RUNTIME = "missing_runtime"
     INCOMPATIBLE_RUNTIME = "incompatible_runtime"
+    RUNTIME_INSTALL_FAILURE = "runtime_install_failure"
+    NO_SUPPORTED_PYTHON = "no_supported_python"
     WORKER_PROTOCOL_FAILURE = "worker_protocol_failure"
     WORKER_PROCESS_FAILURE = "worker_process_failure"
     CANCELLATION = "cancellation"
@@ -34,6 +36,13 @@ SAFE_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.INVALID_SETTINGS: "One or more counting settings are invalid.",
     ErrorCode.MISSING_RUNTIME: "The Tree Counter runtime is not installed.",
     ErrorCode.INCOMPATIBLE_RUNTIME: "The installed runtime is not compatible.",
+    ErrorCode.RUNTIME_INSTALL_FAILURE: (
+        "The Tree Counter runtime could not be installed."
+    ),
+    ErrorCode.NO_SUPPORTED_PYTHON: (
+        "No supported Python 3.12 interpreter was found. "
+        "Install Python 3.12, then try again."
+    ),
     ErrorCode.WORKER_PROTOCOL_FAILURE: (
         "The counting worker sent an invalid response."
     ),

@@ -110,6 +110,14 @@ def default_output_path(request: OutputRequest) -> Path:
     return directory / f"{stem}{OUTPUT_STEM_SUFFIX}{OUTPUT_SUFFIX}"
 
 
+def output_timestamp() -> str:
+    """Return a compact UTC timestamp for a sibling output name."""
+
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+
+
 def _safe_stem(stem: str) -> str:
     """Return a file stem that is safe and readable.
 
@@ -465,6 +473,7 @@ __all__ = [
     "build_summary",
     "default_output_path",
     "load_result_layers",
+    "output_timestamp",
     "resolve_target",
     "staging_path",
     "summary_contains_no_path",

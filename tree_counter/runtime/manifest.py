@@ -31,6 +31,26 @@ _MANIFEST_FIELDS = {
     "installed_at",
 }
 _COMPONENT_FIELDS = {"lock_digest", "versions", "accelerators"}
+RUNTIME_REASON_TEMPLATES = {
+    "different_platform": (
+        "The installed runtime was built for a different platform."
+    ),
+    "unsupported_python": (
+        "The host Python version is outside the supported range."
+    ),
+    "changed_python": (
+        "The Python version changed since the runtime was installed."
+    ),
+    "unknown_components": (
+        "The runtime contains unknown components: {components}."
+    ),
+    "missing_files": "Required runtime files are missing.",
+    "missing_import": "The runtime could not import {module}.",
+    "missing_accelerator": (
+        "{component} no longer provides: {accelerators}."
+    ),
+    "available_update": "A runtime update is available for: {components}.",
+}
 
 
 class ManifestError(TreeCounterError):
@@ -203,33 +223,37 @@ def evaluate_runtime(
     incompatible: list[str] = []
     if manifest.platform != platform:
         incompatible.append(
-            "The installed runtime was built for a different platform."
+            RUNTIME_REASON_TEMPLATES["different_platform"]
         )
     if not catalog.supports_python(python_version):
         incompatible.append(
-            "The host Python version is outside the supported range."
+            RUNTIME_REASON_TEMPLATES["unsupported_python"]
         )
     elif manifest.python_version != python_version:
         incompatible.append(
-            "The Python version changed since the runtime was installed."
+            RUNTIME_REASON_TEMPLATES["changed_python"]
         )
     unknown = set(manifest.components) - set(catalog.components)
     if unknown:
         incompatible.append(
-            f"The runtime contains unknown components: {sorted(unknown)}."
+            RUNTIME_REASON_TEMPLATES["unknown_components"].format(
+                components=sorted(unknown)
+            )
         )
     if incompatible:
         return RuntimeReport(RuntimeState.INCOMPATIBLE, tuple(incompatible))
 
     broken: list[str] = []
     if not present_files:
-        broken.append("Required runtime files are missing.")
+        broken.append(RUNTIME_REASON_TEMPLATES["missing_files"])
     for component_name in manifest.components:
         component = catalog.components[component_name]
         for module in component.imports:
             if not import_results.get(module, False):
                 broken.append(
-                    f"The runtime could not import {module}."
+                    RUNTIME_REASON_TEMPLATES["missing_import"].format(
+                        module=module
+                    )
                 )
     for component_name, record in manifest.components.items():
         missing = [
@@ -239,7 +263,10 @@ def evaluate_runtime(
         ]
         if missing:
             broken.append(
-                f"{component_name} no longer provides: {', '.join(missing)}."
+                RUNTIME_REASON_TEMPLATES["missing_accelerator"].format(
+                    component=component_name,
+                    accelerators=", ".join(missing),
+                )
             )
     if broken:
         return RuntimeReport(RuntimeState.REPAIR_REQUIRED, tuple(broken))
@@ -255,8 +282,9 @@ def evaluate_runtime(
             return RuntimeReport(
                 RuntimeState.UPDATE_AVAILABLE,
                 (
-                    "A runtime update is available for: "
-                    f"{', '.join(sorted(outdated))}.",
+                    RUNTIME_REASON_TEMPLATES["available_update"].format(
+                        components=", ".join(sorted(outdated))
+                    ),
                 ),
             )
     return RuntimeReport(RuntimeState.READY, ())
@@ -268,6 +296,7 @@ __all__ = [
     "ManifestError",
     "RuntimeManifest",
     "RuntimeReport",
+    "RUNTIME_REASON_TEMPLATES",
     "evaluate_runtime",
     "load_manifest",
     "parse_manifest",

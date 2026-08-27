@@ -82,7 +82,8 @@ class FakeYOLO:
         self.task = state.get("task", "detect")
         self.names = state.get("names", {0: "oil_palm"})
         self.model_name = state.get("model_name", "yolo11n.pt")
-        self.model = FakeModule(state["result"])
+        self.ckpt_path = self.model_name
+        self.model = FakeModule(state["result"], state.get("yaml"))
 
     def predict(self, *args, **kwargs):
         FakeYOLO.predict_calls += 1
@@ -256,6 +257,38 @@ class TestInspection:
         assert description.family == "yolo11"
         assert description.backend == "ultralytics"
 
+    def test_a_trained_checkpoint_is_identified_by_its_architecture(
+        self, fake_runtime, tmp_path: Path
+    ) -> None:
+        """A real user checkpoint is never named after its architecture.
+
+        Ultralytics reports the file the user loaded in ``model_name``
+        and ``ckpt_path``, so a trained model called ``release_best.pt``
+        was rejected as "not a YOLO11 model" even though its architecture
+        is ``yolo11n.yaml``. Almost every real checkpoint hits this.
+        """
+
+        _STATE["model_name"] = "/data/checkpoints/release_best.pt"
+
+        description = _backend().inspect(
+            str(_checkpoint(tmp_path)), CHECKPOINT_SHA
+        )
+
+        assert description.family == "yolo11"
+
+    def test_a_foreign_architecture_is_not_saved_by_its_filename(
+        self, fake_runtime, tmp_path: Path
+    ) -> None:
+        """The architecture decides, not what the file is called."""
+
+        from tree_counter.worker.model_info import ModelRejected
+
+        _STATE["model_name"] = "/data/yolo11-lookalike.pt"
+        _STATE["yaml"] = {"yaml_file": "yolov8n.yaml"}
+
+        with pytest.raises(ModelRejected):
+            _backend().inspect(str(_checkpoint(tmp_path)), CHECKPOINT_SHA)
+
     def test_the_description_carries_no_checkpoint_path(
         self, fake_runtime, tmp_path: Path
     ) -> None:
@@ -282,6 +315,7 @@ class TestInspection:
         from tree_counter.worker.backend_base import ModelRejected
 
         fake_runtime["model_name"] = "yolov8n.pt"
+        fake_runtime["yaml"] = {"yaml_file": "yolov8n.yaml"}
 
         with pytest.raises(ModelRejected):
             _backend().inspect(str(_checkpoint(tmp_path)), CHECKPOINT_SHA)

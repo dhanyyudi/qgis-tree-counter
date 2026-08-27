@@ -225,6 +225,43 @@ class TestDiscovery:
 
         assert "python3.12" not in candidates
 
+    def test_the_injected_environment_decides_the_search_path(self) -> None:
+        """PATH lookups must not fall back to this process's own PATH."""
+
+        from tree_counter.runtime.python_probe import discover_candidates
+
+        candidates = discover_candidates(
+            base_executable=None,
+            environment={"PATH": "/nowhere"},
+            platform="darwin",
+            exists=lambda path: False,
+        )
+
+        assert candidates == ()
+
+    def test_well_known_locations_are_searched_without_path(self) -> None:
+        """QGIS launched from the Dock has no Homebrew on its PATH.
+
+        macOS gives a GUI application a minimal PATH, so the only
+        interpreter it can see is the system Python 3.9. Discovery has to
+        look in the places Python is actually installed.
+        """
+
+        from tree_counter.runtime.python_probe import discover_candidates
+
+        installed = "/opt/homebrew/bin/python3.12"
+        candidates = discover_candidates(
+            base_executable=None,
+            environment={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
+            platform="darwin",
+            which=lambda name: (
+                "/usr/bin/python3" if name == "python3" else None
+            ),
+            exists=lambda path: path == installed,
+        )
+
+        assert installed in candidates
+
     def test_discovery_works_against_the_real_environment(self) -> None:
         from tree_counter.runtime.python_probe import discover_candidates
 

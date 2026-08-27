@@ -1,0 +1,207 @@
+"""Tests for the QProcess-backed Runtime Manager runner."""
+
+# SPDX-License-Identifier: AGPL-3.0-only
+
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+import pytest
+
+
+def _supported_python(runner) -> str:
+    """Return a supported standalone Python for the process tests."""
+
+    import os
+
+    from tree_counter.runtime.python_probe import (
+        discover_candidates,
+        probe_python,
+    )
+
+    for candidate in discover_candidates(environment=os.environ):
+        if probe_python(candidate, runner).is_supported:
+            return candidate
+    pytest.skip("no supported standalone Python interpreter is available")
+
+
+def test_runner_captures_exit_code_and_separate_streams(
+    qgis_application,
+) -> None:
+    """A short real process returns its code, stdout, and stderr."""
+
+    from tree_counter.qgis_adapter.runtime_process import QProcessRunner
+
+    runner = QProcessRunner()
+    result = runner(
+        (
+            _supported_python(runner),
+            "-I",
+            "-c",
+            "import sys; print('runner-stdout'); "
+            "print('runner-stderr', file=sys.stderr)",
+        ),
+        10.0,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "runner-stdout"
+    assert result.stderr.strip() == "runner-stderr"
+
+
+def test_runner_kills_a_process_that_exceeds_its_timeout(
+    qgis_application, tmp_path: Path
+) -> None:
+    """A timed-out child cannot continue and write after the runner returns."""
+
+    from tree_counter.qgis_adapter.runtime_process import QProcessRunner
+
+    runner = QProcessRunner()
+    marker = tmp_path / "child-finished"
+    result = runner(
+        (
+            _supported_python(runner),
+            "-I",
+            "-c",
+            (
+                "import pathlib,sys,time; time.sleep(1); "
+                "pathlib.Path(sys.argv[1]).write_text('finished')"
+            ),
+            str(marker),
+        ),
+        0.05,
+    )
+
+    assert result.returncode != 0
+    time.sleep(0.2)
+    assert not marker.exists()
+
+
+def test_plugin_installer_uses_a_real_qprocess_runner(
+    qgis_application,
+) -> None:
+    """The production plugin must not wire Runtime Manager to a refusal."""
+
+    from tree_counter.plugin import TreeCounterPlugin
+    from tree_counter.qgis_adapter.runtime_process import QProcessRunner
+
+    plugin = TreeCounterPlugin(None)
+    installer = plugin._installer()
+
+    assert isinstance(installer._runner, QProcessRunner)
+    assert not hasattr(plugin, "_unavailable_runner")
+
+
+def test_a_crashed_process_is_reported_as_a_failure(
+    qgis_application,
+) -> None:
+    """A process killed by a signal must never look successful."""
+
+    from tree_counter.qgis_adapter.runtime_process import (
+        CRASH_RETURN_CODE,
+        QProcessRunner,
+    )
+
+    runner = QProcessRunner()
+    result = runner(
+        (
+            _supported_python(runner),
+            "-I",
+            "-c",
+            "import os; os.abort()",
+        ),
+        30.0,
+    )
+
+    assert result.returncode == CRASH_RETURN_CODE
+    assert "crash" in result.stderr
+
+
+def test_the_runner_keeps_the_event_loop_alive_while_waiting(
+    qgis_application,
+) -> None:
+    """A slow install must not freeze the QGIS user interface."""
+
+    from qgis.PyQt.QtCore import QTimer
+
+    from tree_counter.qgis_adapter.runtime_process import QProcessRunner
+
+    runner = QProcessRunner()
+    ticks: list[int] = []
+    timer = QTimer()
+    timer.setInterval(50)
+    timer.timeout.connect(lambda: ticks.append(1))
+    timer.start()
+    try:
+        result = runner(
+            (
+                _supported_python(runner),
+                "-I",
+                "-c",
+                "import time; time.sleep(1.5); print('slow-done')",
+            ),
+            30.0,
+        )
+    finally:
+        timer.stop()
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "slow-done"
+    assert ticks, "the runner blocked the event loop for the whole process"
+
+
+def test_the_selected_host_python_can_build_a_venv_from_inside_qgis(
+    qgis_application, tmp_path: Path
+) -> None:
+    """The exact command Install runs must work in QGIS's environment.
+
+    This is the regression guard for the release blocker where the plan
+    used ``sys.executable`` - the QGIS application binary - as the
+    interpreter, so Install could never build anything. Creating a venv
+    is offline, so this test never touches the network.
+    """
+
+    from tree_counter.qgis_adapter.runtime_process import QProcessRunner
+
+    runner = QProcessRunner()
+    interpreter = _supported_python(runner)
+    staging = tmp_path / "staging"
+
+    result = runner(
+        (interpreter, "-I", "-m", "venv", "--copies", str(staging)), 300.0
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (staging / "bin" / "python").exists() or (
+        staging / "Scripts" / "python.exe"
+    ).exists()
+
+
+def test_a_dock_launched_qgis_still_finds_a_supported_python(
+    qgis_application, tmp_path: Path, monkeypatch
+) -> None:
+    """macOS gives a GUI app a minimal PATH with no Homebrew on it.
+
+    Launched from the Dock, the only interpreter on PATH is the system
+    Python 3.9, so selection used to fail with "No supported Python 3.12
+    interpreter was found" even though a supported one was installed.
+    """
+
+    from pathlib import Path as _Path
+
+    from tree_counter.qgis_adapter.runtime_process import QProcessRunner
+    from tree_counter.runtime.installer import RuntimeInstaller
+    from tree_counter.runtime.paths import RuntimePaths
+
+    monkeypatch.setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+    installer = RuntimeInstaller(
+        paths=RuntimePaths(tmp_path / "runtime"),
+        runner=QProcessRunner(),
+        lock_root=_Path("tree_counter/runtime/locks").resolve(),
+    )
+
+    probe = installer.select_host_python()
+
+    assert probe.version.startswith("3.12.")
+    assert probe.is_supported

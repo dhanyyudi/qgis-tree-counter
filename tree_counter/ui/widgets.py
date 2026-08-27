@@ -85,9 +85,14 @@ class CollapsibleSection:
         self.toggle.setChecked(bool(expanded))
 
     def add_row(self, label: str, widget: Any) -> None:
-        """Add a labelled row to the body."""
+        """Add a labelled row to the body.
+
+        The label becomes the field's buddy and its accessible name, so a
+        screen reader announces what each control is for.
+        """
 
         self.body_layout.addRow(label, widget)
+        widget.setAccessibleName(str(label))
 
     def add_widget(self, widget: Any) -> None:
         """Add a full-width widget to the body."""

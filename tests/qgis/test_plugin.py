@@ -133,3 +133,77 @@ def test_the_runtime_status_never_raises(plugin) -> None:
 
     # A machine with no runtime must still open the dock.
     assert isinstance(instance._runtime_status(), str)
+
+
+def test_the_output_request_honours_the_chosen_layers(
+    qgis_application, tmp_path
+) -> None:
+    from tree_counter.plugin import TreeCounterPlugin
+    from tree_counter.ui.controller import ViewState
+
+    instance = TreeCounterPlugin(None)
+
+    class FakeRaster:
+        def source(self):
+            return "/data/aerial.tif"
+
+        def name(self):
+            return "aerial"
+
+    state = ViewState(
+        output_path=str(tmp_path),
+        write_centers=False,
+        write_boxes=True,
+    )
+
+    request = instance._output_request(state, FakeRaster())
+
+    assert request.write_centers is False
+    assert request.write_boxes is True
+    assert request.directory == tmp_path
+
+
+def test_a_task_terminating_after_unload_does_not_reach_the_controller(
+    plugin,
+) -> None:
+    """Unload drops the controller while the task is still running.
+
+    Cancellation is asynchronous, so the task emits its terminal event
+    after unload. Left connected, that called on_cancelled on a
+    controller that no longer exists and raised inside QGIS.
+    """
+
+    class RunningTask:
+        def __init__(self) -> None:
+            self.cancelled = False
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    instance, _iface = plugin
+    task = RunningTask()
+    task.terminal_event = _FakeSignal()
+    task.terminal_event.connect(instance._on_terminal)
+    instance._task = task
+
+    instance.unload()
+    task.terminal_event.emit({"type": "cancelled"})
+
+    assert task.cancelled is True
+
+
+class _FakeSignal:
+    """A minimal stand-in for a pyqtSignal carrying a dict."""
+
+    def __init__(self) -> None:
+        self._slots: list = []
+
+    def connect(self, slot) -> None:
+        self._slots.append(slot)
+
+    def disconnect(self, slot) -> None:
+        self._slots.remove(slot)
+
+    def emit(self, payload: dict) -> None:
+        for slot in list(self._slots):
+            slot(payload)

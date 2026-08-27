@@ -217,14 +217,27 @@ class UltralyticsBackend:
 
     @staticmethod
     def _family_hint(model: Any) -> str:
-        for attribute in ("model_name", "ckpt_path", "cfg"):
-            value = getattr(model, attribute, None)
-            if value:
-                return Path(str(value)).name
+        """Return the architecture this checkpoint was built from.
+
+        The architecture decides, never the file name. Ultralytics puts
+        the path the user loaded in ``model_name`` and ``ckpt_path``, so
+        trusting those rejects every trained checkpoint that is not still
+        called ``yolo11n.pt`` - and would accept a foreign architecture
+        that merely happens to be named like one.
+        """
+
         inner = getattr(model, "model", None)
         yaml = getattr(inner, "yaml", None)
         if isinstance(yaml, Mapping):
-            return str(yaml.get("yaml_file") or yaml.get("model") or "")
+            architecture = str(
+                yaml.get("yaml_file") or yaml.get("model") or ""
+            )
+            if architecture:
+                return Path(architecture).name
+        for attribute in ("cfg", "model_name", "ckpt_path"):
+            value = getattr(model, attribute, None)
+            if value:
+                return Path(str(value)).name
         return ""
 
     def start_run(

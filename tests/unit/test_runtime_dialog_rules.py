@@ -59,6 +59,20 @@ def test_every_state_is_covered() -> None:
     assert set(ALLOWED_ACTIONS) == set(RuntimeState)
 
 
+def test_every_runtime_state_has_its_own_display_label() -> None:
+    from tree_counter.runtime.paths import RuntimeState
+    from tree_counter.ui.runtime_dialog import STATE_LABELS
+
+    assert STATE_LABELS == {
+        RuntimeState.NOT_INSTALLED: "not installed",
+        RuntimeState.INSTALLING: "installing",
+        RuntimeState.READY: "ready",
+        RuntimeState.UPDATE_AVAILABLE: "update available",
+        RuntimeState.INCOMPATIBLE: "incompatible",
+        RuntimeState.REPAIR_REQUIRED: "repair required",
+    }
+
+
 def _catalog():
     from tree_counter.runtime.catalog import load_catalog
 

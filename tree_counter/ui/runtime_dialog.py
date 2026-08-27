@@ -15,10 +15,15 @@ transactional behaviour is tested.
 
 from __future__ import annotations
 
+import re
+from string import Formatter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from tree_counter.i18n import tr
+from tree_counter.runtime.installer import RUNTIME_PROGRESS_MESSAGES
+from tree_counter.runtime.manifest import RUNTIME_REASON_TEMPLATES
 from tree_counter.runtime.paths import RuntimeState
 
 DIALOG_OBJECT_NAME = "TreeCounterRuntimeManager"
@@ -40,6 +45,14 @@ ACTION_LABELS = {
     "verify": "Verify",
     "repair": "Repair",
     "remove": "Remove",
+}
+STATE_LABELS = {
+    RuntimeState.NOT_INSTALLED: "not installed",
+    RuntimeState.INSTALLING: "installing",
+    RuntimeState.READY: "ready",
+    RuntimeState.UPDATE_AVAILABLE: "update available",
+    RuntimeState.INCOMPATIBLE: "incompatible",
+    RuntimeState.REPAIR_REQUIRED: "repair required",
 }
 DESTRUCTIVE_ACTIONS = ("remove", "update", "repair")
 
@@ -103,42 +116,142 @@ def build_offers(catalog: Any, platform: str) -> tuple[ComponentOffer, ...]:
     return tuple(offers)
 
 
-def describe_status(status: Any) -> str:
+def _reason_values(reason: str, template: str) -> dict[str, str] | None:
+    """Return placeholder values when *reason* matches *template*."""
+
+    pattern: list[str] = []
+    fields: list[str] = []
+    for literal, field_name, _format_spec, _conversion in Formatter().parse(
+        template
+    ):
+        pattern.append(re.escape(literal))
+        if field_name is not None:
+            fields.append(field_name)
+            pattern.append(f"(?P<{field_name}>.+?)")
+    match = re.fullmatch("".join(pattern), reason)
+    if match is None:
+        return None
+    return {field: match.group(field) for field in fields}
+
+
+def _translate_template(text: str, templates: Any, tr: Any) -> str:
+    """Translate *text* through the first template that matches it.
+
+    The templates are the ones their producer actually emits, so a
+    reworded message cannot silently fall back to English without a test
+    noticing.
+    """
+
+    for template in templates:
+        if "{" not in template:
+            if text == template:
+                return tr(template)
+            continue
+        values = _reason_values(text, template)
+        if values is not None:
+            return tr(template).format(**values)
+    return text
+
+
+def _translate_reason(reason: str, tr: Any) -> str:
+    """Translate a runtime reason while preserving technical values."""
+
+    return _translate_template(
+        reason, RUNTIME_REASON_TEMPLATES.values(), tr
+    )
+
+
+def translate_progress(message: str, tr: Any = lambda text: text) -> str:
+    """Translate one installer progress message for display."""
+
+    return _translate_template(
+        message, RUNTIME_PROGRESS_MESSAGES.values(), tr
+    )
+
+
+def describe_status(status: Any, tr: Any = lambda text: text) -> str:
     """Return a readable summary of a runtime status."""
 
-    lines = [f"State: {status.state.value.replace('_', ' ')}"]
+    lines = [
+        tr("State: {state}").format(
+            state=tr(STATE_LABELS[status.state])
+        )
+    ]
     manifest = getattr(status, "manifest", None)
     if manifest is not None:
-        lines.append(f"Python: {manifest.python_version}")
-        lines.append(f"Platform: {manifest.platform}")
+        lines.append(
+            tr("Python: {version}").format(
+                version=manifest.python_version
+            )
+        )
+        lines.append(
+            tr("Platform: {platform}").format(platform=manifest.platform)
+        )
         for name, record in sorted(manifest.components.items()):
             versions = ", ".join(
                 f"{package} {version}"
                 for package, version in sorted(record.versions.items())
             )
-            lines.append(f"{name}: {versions}")
+            lines.append(
+                tr("{name}: {versions}").format(
+                    name=name, versions=versions
+                )
+            )
     for reason in getattr(status, "reasons", ()):
-        lines.append(f"- {reason}")
+        lines.append(
+            tr("- {reason}").format(
+                reason=_translate_reason(reason, tr)
+            )
+        )
     return "\n".join(lines)
 
 
+def describe_components(
+    offers: tuple[ComponentOffer, ...], tr: Any = lambda text: text
+) -> str:
+    """Return the translated component summary shown by the dialog."""
+
+    return "\n".join(
+        tr("{kind}: {title} - about {size} from {source}").format(
+            kind=(
+                tr("Recommended")
+                if offer.recommended
+                else tr("Optional")
+            ),
+            title=offer.title,
+            size=offer.estimated_size,
+            source=offer.source,
+        )
+        for offer in offers
+    ) or tr("No runtime component is available for this platform.")
+
+
 def confirmation_text(action: str, offers: tuple[ComponentOffer, ...],
-                      location: Path) -> str:
+                      location: Path,
+                      tr: Any = lambda text: text) -> str:
     """Return the exact text the user must agree to before a change."""
 
-    lines = [f"{ACTION_LABELS.get(action, action)} the Tree Counter runtime?"]
+    action_label = tr(ACTION_LABELS.get(action, action))
+    lines = [
+        tr("{action} the Tree Counter runtime?").format(
+            action=action_label
+        )
+    ]
     if action != "remove":
         for offer in offers:
             lines.append(
-                f"- {offer.title} from {offer.source} "
-                f"(about {offer.estimated_size})"
+                tr("- {title} from {source} (about {size})").format(
+                    title=offer.title,
+                    source=offer.source,
+                    size=offer.estimated_size,
+                )
             )
-    lines.append(f"Location: {location}")
+    lines.append(tr("Location: {location}").format(location=location))
     if action == "remove":
-        lines.append("The installed runtime will be deleted.")
+        lines.append(tr("The installed runtime will be deleted."))
     else:
         lines.append(
-            "The existing runtime is kept until the new one is verified."
+            tr("The existing runtime is kept until the new one is verified.")
         )
     return "\n".join(lines)
 
@@ -153,6 +266,7 @@ class RuntimeManagerDialog:
         confirm: Any = None,
         catalog: Any = None,
         platform: str | None = None,
+        on_changed: Any = None,
     ) -> None:
         from qgis.PyQt import QtWidgets
 
@@ -160,11 +274,12 @@ class RuntimeManagerDialog:
         self._confirm = confirm or self._ask
         self._catalog = catalog
         self._platform = platform
+        self._on_changed = on_changed
         self.started: list[str] = []
 
         self.widget = QtWidgets.QDialog(parent)
         self.widget.setObjectName(DIALOG_OBJECT_NAME)
-        self.widget.setWindowTitle(DIALOG_TITLE)
+        self.widget.setWindowTitle(tr(DIALOG_TITLE))
         layout = QtWidgets.QVBoxLayout(self.widget)
 
         self.status_label = QtWidgets.QLabel("")
@@ -178,11 +293,13 @@ class RuntimeManagerDialog:
         self.location_label = QtWidgets.QLabel("")
         self.location_label.setWordWrap(True)
         layout.addWidget(self.location_label)
+        layout.addStretch(1)
 
+        self.progress_seen: list[str] = []
         self.buttons: dict[str, Any] = {}
         row = QtWidgets.QHBoxLayout()
         for action, label in ACTION_LABELS.items():
-            button = QtWidgets.QPushButton(label)
+            button = QtWidgets.QPushButton(tr(label))
             button.setEnabled(False)
             button.clicked.connect(
                 lambda _checked=False, name=action: self.run_action(name)
@@ -191,7 +308,7 @@ class RuntimeManagerDialog:
             row.addWidget(button)
         layout.addLayout(row)
 
-        self.logs_button = QtWidgets.QPushButton("Open logs")
+        self.logs_button = QtWidgets.QPushButton(tr("Open logs"))
         self.logs_button.clicked.connect(self.open_logs)
         layout.addWidget(self.logs_button)
 
@@ -203,20 +320,14 @@ class RuntimeManagerDialog:
         """Re-read the runtime state. This never changes anything."""
 
         status = self._installer.inspect()
-        self.status_label.setText(describe_status(status))
+        self.status_label.setText(describe_status(status, tr=tr))
         self.location_label.setText(
-            f"Install location: {self._installer._paths.root}"
+            tr("Install location: {root}").format(
+                root=self._installer._paths.root
+            )
         )
         offers = self._offers()
-        self.components.setText(
-            "\n".join(
-                f"{'Recommended' if offer.recommended else 'Optional'}: "
-                f"{offer.title} - about {offer.estimated_size} "
-                f"from {offer.source}"
-                for offer in offers
-            )
-            or "No runtime component is available for this platform."
-        )
+        self.components.setText(describe_components(offers, tr=tr))
         for action, button in self.buttons.items():
             button.setEnabled(
                 is_action_enabled(action, status.state) and bool(offers)
@@ -247,7 +358,7 @@ class RuntimeManagerDialog:
             return False
         offers = self._offers()
         text = confirmation_text(
-            action, offers, Path(self._installer._paths.root)
+            action, offers, Path(self._installer._paths.root), tr=tr
         )
         if not self._confirm(text):
             return False
@@ -255,12 +366,20 @@ class RuntimeManagerDialog:
         try:
             self._perform(action, offers)
         except Exception as error:
-            self.status_label.setText(
-                f"{getattr(error, 'user_message', str(error))}\n"
-                "The previous runtime was kept."
-            )
+            message = tr(getattr(error, "user_message", str(error)))
+            lines = [message]
+            if status.state is not RuntimeState.NOT_INSTALLED:
+                lines.append(tr("The previous runtime was kept."))
+            else:
+                lines.append(tr("Nothing was changed."))
+            self.status_label.setText("\n".join(lines))
             return False
         self.refresh()
+        if self._on_changed is not None:
+            # The dock caches the runtime state; nothing else tells it to
+            # look again, so an installed runtime would still read as
+            # "not installed" until QGIS restarted.
+            self._on_changed()
         return True
 
     def _perform(
@@ -272,22 +391,39 @@ class RuntimeManagerDialog:
         if action == "verify":
             self._installer.verify()
             return
-        plan = self._plan(offers)
-        getattr(self._installer, action)(plan)
+        plan = self._plan(offers, action)
+        getattr(self._installer, action)(plan, self._report_progress)
 
-    def _plan(self, offers: tuple[ComponentOffer, ...]) -> Any:
-        import sys
+    def _report_progress(self, message: str, percent: int) -> None:
+        """Show what the installer is doing right now.
 
+        A runtime install downloads hundreds of megabytes. Without this
+        the dialog would sit unchanged for minutes and look exactly like
+        the failure it is meant to report.
+        """
+
+        text = translate_progress(message, tr)
+        self.progress_seen.append(text)
+        self.status_label.setText(f"{text} ({percent}%)")
+        from qgis.PyQt.QtCore import QCoreApplication, QEventLoop
+
+        if QCoreApplication.instance() is not None:
+            QCoreApplication.processEvents(
+                QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents
+            )
+
+    def _plan(
+        self, offers: tuple[ComponentOffer, ...], operation: str = "install"
+    ) -> Any:
         from tree_counter.runtime.catalog import platform_key
         from tree_counter.runtime.installer import InstallPlan
 
+        host_python = self._installer.select_host_python(operation)
         return InstallPlan(
             components=tuple(offer.name for offer in offers),
             platform=self._platform or platform_key(),
-            python_executable=sys.executable,
-            python_version=".".join(
-                str(part) for part in sys.version_info[:3]
-            ),
+            python_executable=host_python.executable,
+            python_version=host_python.version,
         )
 
     def open_logs(self) -> bool:
@@ -298,7 +434,7 @@ class RuntimeManagerDialog:
 
         logs = Path(self._installer._paths.logs)
         if not logs.is_dir():
-            self.status_label.setText("There are no runtime logs yet.")
+            self.status_label.setText(tr("There are no runtime logs yet."))
             return False
         return bool(
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(logs)))
@@ -309,7 +445,7 @@ class RuntimeManagerDialog:
 
         answer = QMessageBox.question(
             self.widget,
-            DIALOG_TITLE,
+            tr(DIALOG_TITLE),
             text,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -328,9 +464,12 @@ __all__ = [
     "DIALOG_TITLE",
     "ComponentOffer",
     "RuntimeManagerDialog",
+    "STATE_LABELS",
+    "translate_progress",
     "available_actions",
     "build_offers",
     "confirmation_text",
+    "describe_components",
     "describe_status",
     "is_action_enabled",
 ]
