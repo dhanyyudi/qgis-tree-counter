@@ -19,6 +19,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from tree_counter.constants import PROTOCOL_VERSION
@@ -28,6 +29,15 @@ from tree_counter.errors import ErrorCode, TreeCounterError
 from tree_counter.qgis_adapter.process import WorkerChannel
 from tree_counter.qgis_adapter.scope import PixelScope
 from tree_counter.qgis_adapter.workspace import RunWorkspace
+
+# ``CountingTask`` needs QGIS, but ``CountingRun`` and friends must still be
+# importable in ordinary Python for the QGIS-free tests.
+try:
+    from qgis.PyQt.QtCore import pyqtSignal
+    from qgis.core import QgsTask
+except ImportError:  # QGIS is absent; the QGIS-free core still loads.
+    pyqtSignal = None  # type: ignore[assignment]
+    QgsTask = object  # type: ignore[assignment,misc]
 
 TILE_ENCODING = "rgb8"
 ProgressCallback = Callable[[Mapping[str, Any]], None]
@@ -400,9 +410,156 @@ class CountingRun:
             raise RunCancelled()
 
 
+class CountingTask(QgsTask):
+    """A ``QgsTask`` that runs one counting run and publishes its output.
+
+    ``run`` executes a :class:`CountingRun` on the task thread and returns
+    ``True`` only when the run completed and the GeoPackage was published.
+    A cancelled or failed run emits a terminal event and writes nothing, so
+    a partial count is never mistaken for a finished one. Events are plain
+    dictionaries: no QGIS layer object crosses into the controller before
+    publication has succeeded.
+    """
+
+    if pyqtSignal is not None:
+        progress_event = pyqtSignal(dict)
+        warning_event = pyqtSignal(dict)
+        terminal_event = pyqtSignal(dict)
+
+    def __init__(
+        self,
+        description: str,
+        request: RunRequest,
+        channel: WorkerChannel,
+        command: tuple[str, Sequence[str]],
+        tiles: TileSource,
+        workspace: RunWorkspace,
+        raster_info: Any,
+        output_request: Any,
+        crs: Any,
+        should_cancel: CancelCheck | None = None,
+    ) -> None:
+        if pyqtSignal is None:
+            raise RuntimeError("CountingTask requires QGIS")
+        super().__init__(description, QgsTask.Flag.CanCancel)
+        self._request = request
+        self._channel = channel
+        self._program, self._arguments = command
+        self._tiles = tiles
+        self._workspace = workspace
+        self._raster_info = raster_info
+        self._output_request = output_request
+        self._crs = crs
+        self._cancelled = False
+        self._should_cancel = (
+            should_cancel
+            if should_cancel is not None
+            else (lambda: self._cancelled)
+        )
+        self._started_at = ""
+
+    def cancel(self) -> bool:
+        """Ask the run to stop at its next cancellation check."""
+
+        self._cancelled = True
+        return True
+
+    def run(self) -> bool:
+        """Execute the run, publish its output, and report the outcome."""
+
+        self._started_at = self._now()
+        keep_log = False
+        try:
+            self._channel.start(self._program, list(self._arguments))
+            run = CountingRun(
+                self._channel,
+                self._tiles,
+                self._workspace,
+                on_event=self._on_event,
+                should_cancel=self._should_cancel,
+            )
+            result = run.execute(self._request)
+            published = self._publish(result)
+        except RunCancelled:
+            self.terminal_event.emit({"type": "cancelled"})
+            return False
+        except TreeCounterError as error:
+            keep_log = True
+            self.terminal_event.emit({"type": "failed", "error": error})
+            return False
+        except Exception as error:  # A worker bug must not crash QGIS.
+            keep_log = True
+            self.terminal_event.emit(
+                {
+                    "type": "failed",
+                    "error": RunFailed(
+                        ErrorCode.WORKER_PROCESS_FAILURE,
+                        f"{type(error).__name__}: {error}",
+                    ),
+                }
+            )
+            return False
+        finally:
+            self._channel.close()
+            self._workspace.close(keep_log=keep_log)
+        self.terminal_event.emit(
+            {
+                "type": "completed",
+                "result": result,
+                "output_path": str(published),
+            }
+        )
+        return True
+
+    # -- helpers ---------------------------------------------------------
+
+    def _on_event(self, event: Mapping[str, Any]) -> None:
+        kind = str(event.get("type", ""))
+        if kind == "progress":
+            self.progress_event.emit(dict(event))
+        elif kind == "warning":
+            self.warning_event.emit(dict(event))
+
+    def _publish(self, result: RunResult) -> Path:
+        from tree_counter.qgis_adapter.output import (
+            build_summary,
+            resolve_target,
+            write_results,
+        )
+
+        target = resolve_target(self._output_request)
+        summary = build_summary(
+            run_id=result.run_id,
+            status="completed",
+            raster_info=self._raster_info,
+            scope=self._request.scope,
+            settings=self._request.settings,
+            result=result,
+            model_filename=Path(self._request.model_path).name,
+            model_sha256=self._request.model_sha256,
+            started_at=self._started_at,
+            finished_at=self._now(),
+        )
+        return write_results(
+            target,
+            self._output_request,
+            self._raster_info,
+            result.detections,
+            summary,
+            self._crs,
+        )
+
+    @staticmethod
+    def _now() -> str:
+        from datetime import datetime, timezone
+
+        return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
 __all__ = [
     "TILE_ENCODING",
     "CountingRun",
+    "CountingTask",
     "RunCancelled",
     "RunFailed",
     "RunRequest",

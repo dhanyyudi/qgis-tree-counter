@@ -4,7 +4,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 
 from tree_counter.constants import (
     DEFAULT_CONFIDENCE,
@@ -188,3 +189,11 @@ class InferenceSettings:
         object.__setattr__(self, "nms_iou", nms_iou)
         object.__setattr__(self, "duplicate_iou", duplicate_iou)
         object.__setattr__(self, "selected_class_ids", selected)
+
+
+def with_selected_classes(
+    settings: InferenceSettings, class_ids: Sequence[int]
+) -> InferenceSettings:
+    """Return *settings* with exactly the chosen classes selected."""
+
+    return replace(settings, selected_class_ids=tuple(class_ids))
