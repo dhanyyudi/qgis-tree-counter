@@ -22,8 +22,8 @@ Network access is required. Run it from a checkout, not from an install.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
-import subprocess  # nosec B404 - maintainer tool, fixed argv, never a shell
 import sys
 import tempfile
 from pathlib import Path
@@ -50,12 +50,6 @@ PLATFORM_TAGS = {
         "macosx_11_0_arm64",
         "any",
     ),
-    "macos-x86_64": (
-        "macosx_14_0_x86_64",
-        "macosx_12_0_x86_64",
-        "macosx_10_9_x86_64",
-        "any",
-    ),
     "linux-x86_64": (
         "manylinux_2_28_x86_64",
         "manylinux_2_17_x86_64",
@@ -76,6 +70,29 @@ COMPONENT_REQUIREMENTS = {
 }
 
 LOCK_ROOT = REPO_ROOT / "tree_counter" / "runtime" / "locks"
+
+
+async def _run_fixed_argv(argv: list[str]) -> tuple[int, str, str]:
+    """Run pip with an explicit argument vector and timeout bound."""
+
+    process = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(), timeout=RESOLVE_TIMEOUT_SECONDS
+        )
+    except TimeoutError as exc:
+        process.kill()
+        await process.wait()
+        raise SystemExit("pip resolution timed out") from exc
+    return (
+        process.returncode or 0,
+        stdout.decode("utf-8", errors="replace"),
+        stderr.decode("utf-8", errors="replace"),
+    )
 
 
 def resolve(
@@ -109,17 +126,11 @@ def resolve(
         for tag in tags:
             argv.extend(["--platform", tag])
         argv.extend(requirements)
-        completed = subprocess.run(  # nosec B603 - fixed argv, shell=False
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=RESOLVE_TIMEOUT_SECONDS,
-            shell=False,
-        )
-        if completed.returncode != 0 or not report_path.is_file():
+        return_code, stdout, stderr = asyncio.run(_run_fixed_argv(argv))
+        if return_code != 0 or not report_path.is_file():
             raise SystemExit(
                 f"could not resolve {platform}: "
-                f"{completed.stderr.strip() or completed.stdout.strip()}"
+                f"{stderr.strip() or stdout.strip()}"
             )
         report = json.loads(report_path.read_text(encoding="utf-8"))
     resolved: list[tuple[str, str, str]] = []
