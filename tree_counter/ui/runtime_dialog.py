@@ -104,42 +104,132 @@ def build_offers(catalog: Any, platform: str) -> tuple[ComponentOffer, ...]:
     return tuple(offers)
 
 
-def describe_status(status: Any) -> str:
+def _translate_reason(reason: str, tr: Any) -> str:
+    """Translate a runtime reason while preserving technical values."""
+
+    if reason == "The installed runtime was built for a different platform.":
+        return tr("The installed runtime was built for a different platform.")
+    if reason == "The host Python version is outside the supported range.":
+        return tr("The host Python version is outside the supported range.")
+    if reason == "The Python version changed since the runtime was installed.":
+        return tr(
+            "The Python version changed since the runtime was installed."
+        )
+    if reason == "Required runtime files are missing.":
+        return tr("Required runtime files are missing.")
+    if reason.startswith("The runtime contains unknown components: "):
+        components = reason.removeprefix(
+            "The runtime contains unknown components: "
+        )
+        return tr(
+            "The runtime contains unknown components: {components}."
+        ).format(components=components.removesuffix("."))
+    if reason.startswith("The runtime could not import "):
+        module = reason.removeprefix("The runtime could not import ")
+        return tr("The runtime could not import {module}.").format(
+            module=module.removesuffix(".")
+        )
+    if " no longer provides: " in reason:
+        component, accelerators = reason.split(
+            " no longer provides: ", maxsplit=1
+        )
+        return tr("{component} no longer provides: {accelerators}.").format(
+            component=component,
+            accelerators=accelerators.removesuffix("."),
+        )
+    if reason.startswith("A runtime update is available for: "):
+        components = reason.removeprefix(
+            "A runtime update is available for: "
+        )
+        return tr(
+            "A runtime update is available for: {components}."
+        ).format(components=components.removesuffix("."))
+    return reason
+
+
+def describe_status(status: Any, tr: Any = lambda text: text) -> str:
     """Return a readable summary of a runtime status."""
 
-    lines = [f"State: {status.state.value.replace('_', ' ')}"]
+    lines = [
+        tr("State: {state}").format(
+            state=status.state.value.replace("_", " ")
+        )
+    ]
     manifest = getattr(status, "manifest", None)
     if manifest is not None:
-        lines.append(f"Python: {manifest.python_version}")
-        lines.append(f"Platform: {manifest.platform}")
+        lines.append(
+            tr("Python: {version}").format(
+                version=manifest.python_version
+            )
+        )
+        lines.append(
+            tr("Platform: {platform}").format(platform=manifest.platform)
+        )
         for name, record in sorted(manifest.components.items()):
             versions = ", ".join(
                 f"{package} {version}"
                 for package, version in sorted(record.versions.items())
             )
-            lines.append(f"{name}: {versions}")
+            lines.append(
+                tr("{name}: {versions}").format(
+                    name=name, versions=versions
+                )
+            )
     for reason in getattr(status, "reasons", ()):
-        lines.append(f"- {reason}")
+        lines.append(
+            tr("- {reason}").format(
+                reason=_translate_reason(reason, tr)
+            )
+        )
     return "\n".join(lines)
 
 
+def describe_components(
+    offers: tuple[ComponentOffer, ...], tr: Any = lambda text: text
+) -> str:
+    """Return the translated component summary shown by the dialog."""
+
+    return "\n".join(
+        tr("{kind}: {title} - about {size} from {source}").format(
+            kind=(
+                tr("Recommended")
+                if offer.recommended
+                else tr("Optional")
+            ),
+            title=offer.title,
+            size=offer.estimated_size,
+            source=offer.source,
+        )
+        for offer in offers
+    ) or tr("No runtime component is available for this platform.")
+
+
 def confirmation_text(action: str, offers: tuple[ComponentOffer, ...],
-                      location: Path) -> str:
+                      location: Path,
+                      tr: Any = lambda text: text) -> str:
     """Return the exact text the user must agree to before a change."""
 
-    lines = [f"{ACTION_LABELS.get(action, action)} the Tree Counter runtime?"]
+    action_label = tr(ACTION_LABELS.get(action, action))
+    lines = [
+        tr("{action} the Tree Counter runtime?").format(
+            action=action_label
+        )
+    ]
     if action != "remove":
         for offer in offers:
             lines.append(
-                f"- {offer.title} from {offer.source} "
-                f"(about {offer.estimated_size})"
+                tr("- {title} from {source} (about {size})").format(
+                    title=offer.title,
+                    source=offer.source,
+                    size=offer.estimated_size,
+                )
             )
-    lines.append(f"Location: {location}")
+    lines.append(tr("Location: {location}").format(location=location))
     if action == "remove":
-        lines.append("The installed runtime will be deleted.")
+        lines.append(tr("The installed runtime will be deleted."))
     else:
         lines.append(
-            "The existing runtime is kept until the new one is verified."
+            tr("The existing runtime is kept until the new one is verified.")
         )
     return "\n".join(lines)
 
@@ -204,27 +294,14 @@ class RuntimeManagerDialog:
         """Re-read the runtime state. This never changes anything."""
 
         status = self._installer.inspect()
-        self.status_label.setText(describe_status(status))
+        self.status_label.setText(describe_status(status, tr=tr))
         self.location_label.setText(
             tr("Install location: {root}").format(
                 root=self._installer._paths.root
             )
         )
         offers = self._offers()
-        self.components.setText(
-            "\n".join(
-                "{}: {} - about {} from {}".format(
-                    tr("Recommended")
-                    if offer.recommended
-                    else tr("Optional"),
-                    offer.title,
-                    offer.estimated_size,
-                    offer.source,
-                )
-                for offer in offers
-            )
-            or tr("No runtime component is available for this platform.")
-        )
+        self.components.setText(describe_components(offers, tr=tr))
         for action, button in self.buttons.items():
             button.setEnabled(
                 is_action_enabled(action, status.state) and bool(offers)
@@ -255,7 +332,7 @@ class RuntimeManagerDialog:
             return False
         offers = self._offers()
         text = confirmation_text(
-            action, offers, Path(self._installer._paths.root)
+            action, offers, Path(self._installer._paths.root), tr=tr
         )
         if not self._confirm(text):
             return False
@@ -339,6 +416,7 @@ __all__ = [
     "available_actions",
     "build_offers",
     "confirmation_text",
+    "describe_components",
     "describe_status",
     "is_action_enabled",
 ]

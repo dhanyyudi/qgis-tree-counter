@@ -11,6 +11,28 @@ from pathlib import Path
 PACKAGE = Path(__file__).resolve().parents[2] / "tree_counter"
 TS_PATH = PACKAGE / "i18n" / "tree_counter_id.ts"
 
+RUNTIME_DIALOG_BODY_TEMPLATES = {
+    "State: {state}",
+    "Python: {version}",
+    "Platform: {platform}",
+    "{name}: {versions}",
+    "- {reason}",
+    "{action} the Tree Counter runtime?",
+    "{kind}: {title} - about {size} from {source}",
+    "- {title} from {source} (about {size})",
+    "Location: {location}",
+    "The installed runtime will be deleted.",
+    "The existing runtime is kept until the new one is verified.",
+    "The installed runtime was built for a different platform.",
+    "The host Python version is outside the supported range.",
+    "The Python version changed since the runtime was installed.",
+    "Required runtime files are missing.",
+    "The runtime contains unknown components: {components}.",
+    "The runtime could not import {module}.",
+    "{component} no longer provides: {accelerators}.",
+    "A runtime update is available for: {components}.",
+}
+
 
 def _ts_translations() -> dict[str, str]:
     tree = ET.parse(str(TS_PATH))
@@ -144,16 +166,35 @@ def _visible_sources() -> set[str]:
     return sources
 
 
+def _missing_translations(
+    translations: dict[str, str], sources: set[str]
+) -> list[str]:
+    return sorted(source for source in sources if not translations.get(source))
+
+
 def test_every_visible_string_has_an_indonesian_translation() -> None:
     translations = _ts_translations()
-    missing = sorted(
-        source for source in _visible_sources() if not translations.get(source)
-    )
+    missing = _missing_translations(translations, _visible_sources())
 
     assert missing == [], (
         "missing Indonesian translations: "
         + ", ".join(repr(item) for item in missing)
     )
+
+
+def test_runtime_body_templates_are_collected() -> None:
+    collected = set(_tr_literals(PACKAGE / "ui" / "runtime_dialog.py"))
+
+    assert RUNTIME_DIALOG_BODY_TEMPLATES <= collected
+
+
+def test_a_missing_runtime_body_translation_is_reported() -> None:
+    translations = _ts_translations()
+    translations.pop("State: {state}", None)
+
+    assert _missing_translations(
+        translations, RUNTIME_DIALOG_BODY_TEMPLATES
+    ) == ["State: {state}"]
 
 
 def test_no_translation_entry_is_unused() -> None:

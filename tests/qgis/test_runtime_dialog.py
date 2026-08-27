@@ -82,6 +82,45 @@ def test_the_dialog_shows_state_components_and_location(
     assert str(tmp_path) in dialog.location_label.text()
 
 
+def test_the_runtime_manager_translates_its_body_text(
+    qgis_application, tmp_path: Path
+) -> None:
+    from qgis.PyQt.QtCore import QCoreApplication
+
+    from tree_counter.i18n import install_translator
+    from tree_counter.runtime.paths import RuntimeState
+    from tree_counter.ui.runtime_dialog import RuntimeManagerDialog
+
+    app = QCoreApplication.instance()
+    translator = install_translator(app, locale="id_ID")
+    assert translator is not None
+    confirmations: list[str] = []
+
+    def confirm(text: str) -> bool:
+        confirmations.append(text)
+        return True
+
+    try:
+        installer = FakeInstaller(RuntimeState.NOT_INSTALLED, tmp_path)
+        dialog = RuntimeManagerDialog(
+            installer,
+            confirm=confirm,
+            platform="macos-arm64",
+        )
+
+        assert "Status:" in dialog.status_label.text()
+        assert "State:" not in dialog.status_label.text()
+        assert "Direkomendasikan" in dialog.components.text()
+
+        assert dialog.run_action("install") is True
+        assert len(confirmations) == 1
+        assert "Pasang runtime Tree Counter?" in confirmations[0]
+        assert "Install the Tree Counter runtime?" not in confirmations[0]
+        assert "Lokasi pemasangan:" in confirmations[0]
+    finally:
+        app.removeTranslator(translator)
+
+
 def test_only_applicable_actions_are_enabled(
     qgis_application, tmp_path: Path
 ) -> None:

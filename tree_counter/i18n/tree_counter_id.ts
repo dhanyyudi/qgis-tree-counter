@@ -232,6 +232,82 @@
         <translation>Buka log</translation>
     </message>
     <message>
+        <source>State: {state}</source>
+        <translation>Status: {state}</translation>
+    </message>
+    <message>
+        <source>Python: {version}</source>
+        <translation>Python: {version}</translation>
+    </message>
+    <message>
+        <source>Platform: {platform}</source>
+        <translation>Platform: {platform}</translation>
+    </message>
+    <message>
+        <source>{name}: {versions}</source>
+        <translation>{name}: {versions}</translation>
+    </message>
+    <message>
+        <source>- {reason}</source>
+        <translation>- {reason}</translation>
+    </message>
+    <message>
+        <source>{action} the Tree Counter runtime?</source>
+        <translation>{action} runtime Tree Counter?</translation>
+    </message>
+    <message>
+        <source>{kind}: {title} - about {size} from {source}</source>
+        <translation>{kind}: {title} - sekitar {size} dari {source}</translation>
+    </message>
+    <message>
+        <source>- {title} from {source} (about {size})</source>
+        <translation>- {title} dari {source} (sekitar {size})</translation>
+    </message>
+    <message>
+        <source>Location: {location}</source>
+        <translation>Lokasi pemasangan: {location}</translation>
+    </message>
+    <message>
+        <source>The installed runtime will be deleted.</source>
+        <translation>Runtime yang terpasang akan dihapus.</translation>
+    </message>
+    <message>
+        <source>The existing runtime is kept until the new one is verified.</source>
+        <translation>Runtime yang ada dipertahankan sampai yang baru berhasil diverifikasi.</translation>
+    </message>
+    <message>
+        <source>The installed runtime was built for a different platform.</source>
+        <translation>Runtime yang terpasang dibuat untuk platform yang berbeda.</translation>
+    </message>
+    <message>
+        <source>The host Python version is outside the supported range.</source>
+        <translation>Versi Python host berada di luar rentang yang didukung.</translation>
+    </message>
+    <message>
+        <source>The Python version changed since the runtime was installed.</source>
+        <translation>Versi Python berubah sejak runtime dipasang.</translation>
+    </message>
+    <message>
+        <source>Required runtime files are missing.</source>
+        <translation>Berkas runtime yang diperlukan tidak ada.</translation>
+    </message>
+    <message>
+        <source>The runtime contains unknown components: {components}.</source>
+        <translation>Runtime berisi komponen yang tidak dikenal: {components}.</translation>
+    </message>
+    <message>
+        <source>The runtime could not import {module}.</source>
+        <translation>Runtime tidak dapat mengimpor {module}.</translation>
+    </message>
+    <message>
+        <source>{component} no longer provides: {accelerators}.</source>
+        <translation>{component} tidak lagi menyediakan: {accelerators}.</translation>
+    </message>
+    <message>
+        <source>A runtime update is available for: {components}.</source>
+        <translation>Pembaruan runtime tersedia untuk: {components}.</translation>
+    </message>
+    <message>
         <source>Install location: {root}</source>
         <translation>Lokasi pemasangan: {root}</translation>
     </message>
