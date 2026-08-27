@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
+
+from tree_counter.worker.backend_base import ModelDescription
 
 
 class FakeBackendFailure(RuntimeError):
@@ -31,22 +34,46 @@ class FakeBackend:
         self.closed = False
         self._class_names = _class_names()
 
-    def inspect(self, model_path: str, model_sha256: str) -> dict[str, Any]:
+    def inspect(
+        self, model_path: str, model_sha256: str
+    ) -> ModelDescription:
         if os.environ.get("TREE_COUNTER_FAKE_INSPECT_ERROR"):
             raise FakeBackendFailure("scripted inspect failure")
-        return {
-            "class_names": list(self._class_names),
-            "backend": self.name,
-            "device": "cpu",
-            "input_size": 640,
-        }
+        model = Path(model_path)
+        suffix = model.suffix.casefold()
+        return ModelDescription(
+            filename=model.name,
+            sha256=model_sha256,
+            model_format=suffix.removeprefix("."),
+            task="detect",
+            family="yolo11",
+            class_names=self._class_names,
+            input_width=640,
+            input_height=640,
+            dynamic_shape=False,
+            backend=self.name,
+            provider=self.name,
+            device="cpu",
+        )
 
     def start_run(
         self, model_path: str, model_sha256: str, settings: Any
     ) -> dict[str, Any]:
         if os.environ.get("TREE_COUNTER_FAKE_START_ERROR"):
             raise FakeBackendFailure("scripted start failure")
-        return {"backend": self.name, "device": "cpu"}
+        warnings = tuple(
+            item
+            for item in os.environ.get("TREE_COUNTER_FAKE_WARNINGS", "").split(
+                ","
+            )
+            if item
+        )
+        return {
+            "backend": self.name,
+            "provider": self.name,
+            "device": "cpu",
+            "warnings": list(warnings),
+        }
 
     def infer_tile(
         self, tile_path: str, tile: Mapping[str, Any]

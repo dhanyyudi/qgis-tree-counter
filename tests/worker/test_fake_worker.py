@@ -156,6 +156,7 @@ def _tile_message(
         "run_id": "run-1",
         "tile_id": tile_id,
         "tile_path": tile_path,
+        "tile_encoding": "rgb8",
         "x_offset": x_offset,
         "y_offset": y_offset,
         "valid_width": valid,
@@ -393,7 +394,7 @@ def test_cancellation_mid_run_ends_the_process_cleanly(
     assert "run_completed" not in _types(messages)
 
 
-def test_a_short_run_warns_about_the_tile_count(
+def test_a_short_run_fails_without_partial_success(
     session, tmp_path: Path
 ) -> None:
     tile = _write_tile(tmp_path, "tile_a.png")
@@ -412,9 +413,28 @@ def test_a_short_run_warns_about_the_tile_count(
 
     code, messages, _ = worker.finish()
 
-    assert code == 0
-    warnings = [item for item in messages if item["type"] == "warning"]
-    assert [item["code"] for item in warnings] == ["tile_count_mismatch"]
+    assert code == 1
+    assert _types(messages)[-1] == "error"
+    assert messages[-1]["code"] == "worker_protocol_failure"
+    assert "run_completed" not in _types(messages)
+
+
+def test_an_extra_tile_is_rejected_before_backend_inference(
+    session, tmp_path: Path
+) -> None:
+    tile = _write_tile(tmp_path, "tile_a.png")
+    worker = session(TREE_COUNTER_WORKER_BACKEND="fake")
+    worker.send(_hello())
+    worker.send(_start_run(tmp_path, 1))
+    worker.send(_tile_message("r00000_c00000", tile))
+    worker.send(_tile_message("r00000_c00001", tile))
+
+    code, messages, _ = worker.finish()
+
+    assert code == 1
+    assert _types(messages).count("tile_completed") == 1
+    assert messages[-1]["type"] == "error"
+    assert "run_completed" not in _types(messages)
 
 
 def test_malformed_host_input_fails_closed(session) -> None:
@@ -542,6 +562,29 @@ def test_stdout_carries_protocol_lines_only(session, tmp_path: Path) -> None:
     for message in messages:
         validate_worker_message(message)
     assert stderr == ""
+
+
+def test_start_run_preserves_backend_warnings(session, tmp_path: Path) -> None:
+    worker = session(
+        TREE_COUNTER_WORKER_BACKEND="fake",
+        TREE_COUNTER_FAKE_WARNINGS="cpu_fallback,provider_fallback",
+    )
+    worker.send(_hello())
+    worker.send(_start_run(tmp_path, 0))
+    worker.send(
+        {
+            "type": "finish_tiles",
+            "protocol_version": 1,
+            "request_id": "req-finish",
+            "run_id": "run-1",
+        }
+    )
+
+    code, messages, _ = worker.finish()
+
+    assert code == 0
+    started = next(item for item in messages if item["type"] == "run_started")
+    assert started["warnings"] == ["cpu_fallback", "provider_fallback"]
 
 
 def test_without_a_backend_the_run_fails_with_a_runtime_error(

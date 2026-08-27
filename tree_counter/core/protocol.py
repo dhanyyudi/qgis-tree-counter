@@ -69,11 +69,32 @@ def _text(value: object, name: str) -> None:
         raise ProtocolError(f"{name} is too long")
 
 
+def _filename(value: object, name: str) -> None:
+    _text(value, name)
+    if not isinstance(value, str):  # pragma: no cover - checked by _text.
+        return
+    if "/" in value or "\\" in value or value in (".", ".."):
+        raise ProtocolError(f"{name} must be a filename")
+
+
+def _literal(expected: object):
+    def check(value: object, name: str) -> None:
+        if value != expected or type(value) is not type(expected):
+            raise ProtocolError(f"{name} must be {expected!r}")
+
+    return check
+
+
 def _non_negative_int(value: object, name: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ProtocolError(f"{name} must be an integer")
     if value < 0:
         raise ProtocolError(f"{name} must not be negative")
+
+
+def _bool(value: object, name: str) -> None:
+    if type(value) is not bool:
+        raise ProtocolError(f"{name} must be a boolean")
 
 
 def _positive_int(value: object, name: str) -> None:
@@ -143,7 +164,9 @@ def _tile_path(value: object, name: str) -> None:
 _CHECKS = {
     "identifier": _identifier,
     "text": _text,
+    "filename": _filename,
     "non_negative_int": _non_negative_int,
+    "bool": _bool,
     "positive_int": _positive_int,
     "finite": _finite_number,
     "mapping": _mapping,
@@ -152,6 +175,7 @@ _CHECKS = {
     "sha256": _sha256,
     "model_path": _model_path,
     "tile_path": _tile_path,
+    "rgb8": _literal("rgb8"),
 }
 
 _COMMON_FIELDS = {
@@ -182,6 +206,7 @@ HOST_SCHEMAS: dict[str, dict[str, _Field]] = {
         "run_id": _Field("identifier"),
         "tile_id": _Field("identifier"),
         "tile_path": _Field("tile_path"),
+        "tile_encoding": _Field("rgb8"),
         "x_offset": _Field("non_negative_int"),
         "y_offset": _Field("non_negative_int"),
         "valid_width": _Field("positive_int"),
@@ -199,15 +224,26 @@ WORKER_SCHEMAS: dict[str, dict[str, _Field]] = {
         "python_version": _Field("text", required=False),
     },
     "model_info": {
+        "filename": _Field("filename"),
+        "sha256": _Field("sha256"),
+        "model_format": _Field("identifier"),
+        "task": _Field("identifier"),
+        "family": _Field("identifier"),
         "class_names": _Field("string_list"),
+        "input_width": _Field("non_negative_int"),
+        "input_height": _Field("non_negative_int"),
+        "dynamic_shape": _Field("bool"),
         "backend": _Field("identifier"),
+        "provider": _Field("identifier"),
         "device": _Field("identifier"),
-        "input_size": _Field("positive_int", required=False),
+        "warnings": _Field("string_list"),
     },
     "run_started": {
         "run_id": _Field("identifier"),
         "backend": _Field("identifier", required=False),
+        "provider": _Field("identifier", required=False),
         "device": _Field("identifier", required=False),
+        "warnings": _Field("string_list", required=False),
     },
     "tile_completed": {
         "run_id": _Field("identifier"),

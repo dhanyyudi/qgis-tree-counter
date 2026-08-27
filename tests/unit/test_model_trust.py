@@ -311,3 +311,34 @@ def test_a_corrupt_trust_record_is_treated_as_untrusted(
     )
 
     assert _trust(tmp_path).requires_confirmation(identity) is True
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"filename": "best.pt"},
+        {"filename": "best.pt", "confirmed_at": "yesterday"},
+        {"filename": "best.pt", "confirmed_at": True},
+        {"filename": "best.pt", "confirmed_at": 1, "extra": "grant"},
+    ],
+)
+def test_partial_or_extra_trust_records_are_treated_as_untrusted(
+    tmp_path: Path, record: dict[str, object]
+) -> None:
+    import json
+
+    from tree_counter.settings.trust import identify_model
+
+    identity = identify_model(_model(tmp_path, "best.pt", b"weights"))
+    (tmp_path / "settings.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "trusted_models": {identity.sha256: record},
+                "presets": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert _trust(tmp_path).requires_confirmation(identity) is True

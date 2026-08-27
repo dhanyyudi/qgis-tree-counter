@@ -14,6 +14,8 @@ Runtime akan dipasang dan dikelola secara eksplisit oleh pengguna. Plugin tidak 
 
 Targetnya adalah satu paket untuk QGIS 3.44 LTR hingga QGIS 4.x (maksimal 4.99) pada Windows, macOS, dan Ubuntu LTS. CPU adalah baseline wajib; akselerasi perangkat keras yang kompatibel bersifat opsional.
 
+Runtime deteksi dipasang terpisah, sesuai permintaan, ke direktori milik pengguna. Runtime tersedia untuk Windows x86_64, macOS Apple Silicon, dan Linux x86_64. Pada Mac Intel plugin tetap dimuat, tetapi runtime tidak dapat dipasang karena rilis PyTorch dan ONNX Runtime yang dipatok tidak lagi menerbitkan wheel macOS x86_64 untuk Python 3.12.
+
 ## Status pengembangan
 
 Lihat [CONTRIBUTING.md](CONTRIBUTING.md) untuk ekspektasi pengembangan, [CHANGELOG.md](CHANGELOG.md) untuk riwayat rilis, dan [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) untuk gerbang pemeriksaan sebelum rilis. Proyek ini dilisensikan berdasarkan GNU Affero General Public License, hanya versi 3 (AGPL-3.0-only). Checklist tersebut menjelaskan bahwa matriks uji manual Windows dan macOS harus dicatat lulus sebelum tag atau GitHub Release dibuat; unggahan ke repositori plugin QGIS tetap merupakan tindakan manual.

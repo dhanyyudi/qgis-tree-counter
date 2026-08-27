@@ -1,0 +1,91 @@
+{
+  "catalog_version": 1,
+  "python": {
+    "minimum": "3.12",
+    "maximum": "3.13"
+  },
+  "allowed_hosts": [
+    "pypi.org",
+    "files.pythonhosted.org",
+    "download.pytorch.org"
+  ],
+  "components": {
+    "onnxruntime": {
+      "title": "ONNX Runtime (CPU)",
+      "recommended": true,
+      "imports": [
+        "numpy",
+        "onnxruntime"
+      ],
+      "profiles": [
+        {
+          "platform": "windows-x86_64",
+          "accelerators": [
+            "cpu"
+          ],
+          "lock": "windows-x86_64/onnxruntime.txt",
+          "index_url": "https://pypi.org/simple",
+          "estimated_download_bytes": 55000000
+        },
+        {
+          "platform": "macos-arm64",
+          "accelerators": [
+            "cpu",
+            "coreml"
+          ],
+          "lock": "macos-arm64/onnxruntime.txt",
+          "index_url": "https://pypi.org/simple",
+          "estimated_download_bytes": 45000000
+        },
+        {
+          "platform": "linux-x86_64",
+          "accelerators": [
+            "cpu"
+          ],
+          "lock": "linux-x86_64/onnxruntime.txt",
+          "index_url": "https://pypi.org/simple",
+          "estimated_download_bytes": 55000000
+        }
+      ]
+    },
+    "pytorch": {
+      "title": "PyTorch and Ultralytics (trusted .pt checkpoints)",
+      "recommended": false,
+      "imports": [
+        "numpy",
+        "torch",
+        "ultralytics"
+      ],
+      "profiles": [
+        {
+          "platform": "windows-x86_64",
+          "accelerators": [
+            "cpu"
+          ],
+          "lock": "windows-x86_64/pytorch.txt",
+          "index_url": "https://pypi.org/simple",
+          "estimated_download_bytes": 320000000
+        },
+        {
+          "platform": "macos-arm64",
+          "accelerators": [
+            "cpu",
+            "mps"
+          ],
+          "lock": "macos-arm64/pytorch.txt",
+          "index_url": "https://pypi.org/simple",
+          "estimated_download_bytes": 250000000
+        },
+        {
+          "platform": "linux-x86_64",
+          "accelerators": [
+            "cpu"
+          ],
+          "lock": "linux-x86_64/pytorch.txt",
+          "index_url": "https://pypi.org/simple",
+          "estimated_download_bytes": 900000000
+        }
+      ]
+    }
+  }
+}

@@ -33,6 +33,7 @@ from tree_counter.core.protocol import (
 )
 from tree_counter.core.types import Detection, InferenceSettings, PixelBox
 from tree_counter.errors import ErrorCode, TreeCounterError
+from tree_counter.worker.backend_base import ModelDescription
 
 WriteLine = Callable[[bytes], None]
 Log = Callable[[str], None]
@@ -44,7 +45,99 @@ BACKEND_ENVIRONMENT_VARIABLE = "TREE_COUNTER_WORKER_BACKEND"
 # tests and its module is never part of the plugin package.
 FAKE_BACKEND_NAME = "fake"
 FAKE_BACKEND_MODULE = "tree_counter_fake_backend"
-SUPPORTED_BACKEND_NAMES = ("auto", FAKE_BACKEND_NAME)
+ONNX_BACKEND_NAME = "onnx"
+ULTRALYTICS_BACKEND_NAME = "ultralytics"
+SUPPORTED_BACKEND_NAMES = (
+    "auto",
+    ONNX_BACKEND_NAME,
+    ULTRALYTICS_BACKEND_NAME,
+    FAKE_BACKEND_NAME,
+)
+SUFFIX_BACKENDS = {
+    ".onnx": ONNX_BACKEND_NAME,
+    ".pt": ULTRALYTICS_BACKEND_NAME,
+}
+
+
+def _build_backend(name: str) -> Any:
+    if name == ONNX_BACKEND_NAME:
+        from tree_counter.worker.backend_onnx import create_backend
+
+        return create_backend()
+    if name == ULTRALYTICS_BACKEND_NAME:
+        from tree_counter.worker.backend_ultralytics import create_backend
+
+        return create_backend()
+    raise BackendUnavailableError(f"unsupported backend name: {name!r}")
+
+
+class SelectingBackend:
+    """Chooses the real backend from the model's format on each idle use.
+
+    The worker is started before the model is known, so the concrete
+    backend is resolved from the file suffix at the first call and reused
+    while reusing it for repeated calls for the same model format.
+    """
+
+    name = "auto"
+
+    def __init__(self) -> None:
+        self._backend: Any = None
+        self._chosen_suffix: str | None = None
+
+    def _for(self, model_path: str) -> Any:
+        suffix = Path(model_path).suffix.casefold()
+        if suffix not in SUFFIX_BACKENDS:
+            raise BackendUnavailableError(
+                f"no backend handles {suffix!r} models"
+            )
+        chosen = SUFFIX_BACKENDS[suffix]
+        if self._backend is None or self._chosen_suffix != suffix:
+            if self._backend is not None:
+                self._backend.close()
+            self._backend = _build_backend(chosen)
+            self._chosen_suffix = suffix
+            self.name = getattr(self._backend, "name", chosen)
+        return self._backend
+
+    def capabilities(self) -> tuple[str, ...]:
+        """Return accelerators once a backend has been chosen."""
+
+        if self._backend is None:
+            return ()
+        return tuple(self._backend.capabilities())
+
+    def inspect(self, model_path: str, model_sha256: str) -> Any:
+        """Describe a model using the backend its format requires."""
+
+        return self._for(model_path).inspect(model_path, model_sha256)
+
+    def start_run(
+        self, model_path: str, model_sha256: str, settings: Any
+    ) -> Mapping[str, Any]:
+        """Load a model using the backend its format requires."""
+
+        return self._for(model_path).start_run(
+            model_path, model_sha256, settings
+        )
+
+    def infer_tile(
+        self, tile_path: str, tile: Mapping[str, Any]
+    ) -> list[Any]:
+        """Delegate tile inference to the chosen backend."""
+
+        if self._backend is None:
+            raise BackendUnavailableError("no model has been loaded")
+        return self._backend.infer_tile(tile_path, tile)
+
+    def close(self) -> None:
+        """Close the chosen backend, if one was ever built."""
+
+        backend = self._backend
+        self._backend = None
+        self._chosen_suffix = None
+        if backend is not None:
+            backend.close()
 
 
 class BackendUnavailableError(TreeCounterError):
@@ -59,19 +152,19 @@ def resolve_backend_factory(
 ) -> BackendFactory:
     """Return a factory for the backend named by the environment.
 
-    Only hard-coded names are accepted. ``auto`` has no real backend until
-    the ONNX Runtime and Ultralytics backends land, so it fails closed with
-    a missing-runtime error rather than guessing.
+    Only hard-coded names are accepted, so the environment can never name
+    an arbitrary import target. ``auto`` defers the choice until the model
+    is known and then picks by file format.
     """
 
     env = os.environ if environment is None else environment
     name = env.get(BACKEND_ENVIRONMENT_VARIABLE, "auto").strip().casefold()
     if name not in SUPPORTED_BACKEND_NAMES:
         raise BackendUnavailableError(f"unsupported backend name: {name!r}")
+    if name == "auto":
+        return SelectingBackend
     if name != FAKE_BACKEND_NAME:
-        raise BackendUnavailableError(
-            "no inference backend is installed in this runtime"
-        )
+        return lambda: _build_backend(name)
 
     def _factory() -> Any:
         try:
@@ -252,16 +345,16 @@ class WorkerRunner:
         info = backend.inspect(
             str(message["model_path"]), str(message["model_sha256"])
         )
+        if not isinstance(info, ModelDescription):
+            raise ProtocolError(
+                "backend inspect did not return ModelDescription"
+            )
         payload: dict[str, object] = {
             "type": "model_info",
             "protocol_version": PROTOCOL_VERSION,
             "request_id": message["request_id"],
-            "class_names": list(info["class_names"]),
-            "backend": str(info["backend"]),
-            "device": str(info["device"]),
+            **info.as_message(),
         }
-        if info.get("input_size") is not None:
-            payload["input_size"] = int(info["input_size"])
         self._send(payload)
 
     def _on_start_run(self, message: Mapping[str, object]) -> None:
@@ -293,9 +386,13 @@ class WorkerRunner:
             "run_id": self._run_id,
         }
         if isinstance(started, Mapping):
-            for key in ("backend", "device"):
+            for key in ("backend", "provider", "device"):
                 if started.get(key) is not None:
                     payload[key] = str(started[key])
+            if started.get("warnings") is not None:
+                payload["warnings"] = list(started["warnings"])
+        else:
+            payload["warnings"] = []
         self._send(payload)
 
     @staticmethod
@@ -345,6 +442,8 @@ class WorkerRunner:
 
     def _on_tile(self, message: Mapping[str, object]) -> None:
         settings = self._require_run(message)
+        if self._completed_tiles >= self._total_tiles:
+            raise ProtocolError("received more tiles than announced")
         tile_id = str(message["tile_id"])
         path = self._resolve_tile_path(str(message["tile_path"]))
         backend = self._ensure_backend()
@@ -446,18 +545,9 @@ class WorkerRunner:
     def _on_finish_tiles(self, message: Mapping[str, object]) -> None:
         settings = self._require_run(message)
         if self._completed_tiles != self._total_tiles:
-            self._send(
-                {
-                    "type": "warning",
-                    "protocol_version": PROTOCOL_VERSION,
-                    "request_id": message["request_id"],
-                    "run_id": self._run_id,
-                    "code": "tile_count_mismatch",
-                    "message": (
-                        "The number of processed tiles did not match the "
-                        "announced tile count."
-                    ),
-                }
+            raise ProtocolError(
+                "the number of processed tiles does not match the "
+                "announced tile count"
             )
         final = deduplicate_detections(
             self._detections, settings.duplicate_iou
@@ -504,6 +594,7 @@ class WorkerRunner:
 __all__ = [
     "BACKEND_ENVIRONMENT_VARIABLE",
     "BackendUnavailableError",
+    "SelectingBackend",
     "SUPPORTED_BACKEND_NAMES",
     "WorkerRunner",
     "resolve_backend_factory",

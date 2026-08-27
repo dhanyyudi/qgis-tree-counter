@@ -14,6 +14,8 @@ The runtime will be installed and managed explicitly by the user. The plugin wil
 
 The target is one package for QGIS 3.44 LTR through QGIS 4.x (up to 4.99) on Windows, macOS, and Ubuntu LTS. CPU is the required baseline; compatible hardware acceleration is optional.
 
+The detection runtime is installed separately, on demand, into a per-user directory. It is available for Windows x86_64, macOS Apple Silicon, and Linux x86_64. On Intel Macs the plugin loads but the runtime cannot be installed, because the pinned PyTorch and ONNX Runtime releases no longer publish macOS x86_64 wheels for Python 3.12.
+
 ## Development status
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development expectations, [CHANGELOG.md](CHANGELOG.md) for release history, and [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for the blocking pre-release gates. The project is licensed under the GNU Affero General Public License, version 3 only (AGPL-3.0-only).

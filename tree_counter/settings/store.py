@@ -46,10 +46,10 @@ def _application_data_directory() -> Path:
         base = os.environ.get("XDG_DATA_HOME")
         root = Path(base) if base else Path.home() / ".local" / "share"
         return root / "TreeCounter"
+    # Always the scoped enum: PyQt5 and PyQt6 both expose it, and the
+    # unscoped Qt5 spelling is rejected by the PyQGIS 4 checker.
     location = QStandardPaths.writableLocation(
         QStandardPaths.StandardLocation.AppDataLocation
-        if hasattr(QStandardPaths, "StandardLocation")
-        else QStandardPaths.AppDataLocation
     )
     if not location:  # pragma: no cover - defensive on exotic platforms.
         return Path.home() / ".TreeCounter"
