@@ -40,7 +40,8 @@ SAFE_MESSAGES: dict[ErrorCode, str] = {
         "The Tree Counter runtime could not be installed."
     ),
     ErrorCode.NO_SUPPORTED_PYTHON: (
-        "No supported Python 3.12 interpreter was found."
+        "No supported Python 3.12 interpreter was found. "
+        "Install Python 3.12, then try again."
     ),
     ErrorCode.WORKER_PROTOCOL_FAILURE: (
         "The counting worker sent an invalid response."

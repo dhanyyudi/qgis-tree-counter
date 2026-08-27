@@ -20,6 +20,18 @@ from dataclasses import dataclass
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
 SUPPORTED_PYTHON_PREFIX = "3.12."
+# macOS hands a GUI application a minimal PATH, so QGIS launched from the
+# Dock cannot see a Homebrew or python.org interpreter at all. Searching
+# the directories Python is actually installed into is what makes the
+# Runtime Manager work outside a terminal.
+POSIX_CANDIDATE_TEMPLATES = (
+    "/opt/homebrew/bin/python3.12",
+    "/opt/homebrew/opt/python@3.12/bin/python3.12",
+    "/usr/local/bin/python3.12",
+    "/usr/local/opt/python@3.12/bin/python3.12",
+    "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+    "/usr/bin/python3.12",
+)
 PROBE_TIMEOUT_SECONDS = 30.0
 
 # A fixed literal, never assembled from caller input.
@@ -150,6 +162,7 @@ def discover_candidates(
     environment: Mapping[str, str] | None = None,
     platform: str | None = None,
     which: Callable[[str], str | None] | None = None,
+    exists: Callable[[str], bool] | None = None,
 ) -> tuple[str, ...]:
     """Return ordered absolute candidate interpreters, most likely first.
 
@@ -160,7 +173,14 @@ def discover_candidates(
 
     env = os.environ if environment is None else environment
     system = sys.platform if platform is None else platform
-    lookup = shutil.which if which is None else which
+    if which is None:
+        # shutil.which defaults to this process's PATH, which would quietly
+        # ignore the environment the caller asked us to search.
+        def lookup(name: str) -> str | None:
+            return shutil.which(name, path=env.get("PATH"))
+    else:
+        lookup = which
+    present = os.path.exists if exists is None else exists
     if base_executable is None and environment is None:
         base_executable = getattr(sys, "_base_executable", None)
 
@@ -198,6 +218,10 @@ def discover_candidates(
         found = lookup(name)
         if found:
             candidates.append(str(found))
+    if not system.startswith("win"):
+        candidates.extend(
+            path for path in POSIX_CANDIDATE_TEMPLATES if present(path)
+        )
     ordered = [
         candidate
         for candidate in dict.fromkeys(candidates)
@@ -222,6 +246,7 @@ def select_python(
 
 __all__ = [
     "PROBE_SOURCE",
+    "POSIX_CANDIDATE_TEMPLATES",
     "PROBE_TIMEOUT_SECONDS",
     "SUPPORTED_PYTHON_PREFIX",
     "PythonProbe",

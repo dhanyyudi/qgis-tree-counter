@@ -192,8 +192,8 @@
         <translation>Runtime Tree Counter tidak dapat dipasang.</translation>
     </message>
     <message>
-        <source>No supported Python 3.12 interpreter was found.</source>
-        <translation>Tidak ditemukan interpreter Python 3.12 yang didukung.</translation>
+        <source>No supported Python 3.12 interpreter was found. Install Python 3.12, then try again.</source>
+        <translation>Tidak ditemukan interpreter Python 3.12 yang didukung. Pasang Python 3.12, lalu coba lagi.</translation>
     </message>
     <message>
         <source>The counting worker sent an invalid response.</source>

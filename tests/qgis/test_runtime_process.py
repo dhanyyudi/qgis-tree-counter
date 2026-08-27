@@ -176,3 +176,32 @@ def test_the_selected_host_python_can_build_a_venv_from_inside_qgis(
     assert (staging / "bin" / "python").exists() or (
         staging / "Scripts" / "python.exe"
     ).exists()
+
+
+def test_a_dock_launched_qgis_still_finds_a_supported_python(
+    qgis_application, tmp_path: Path, monkeypatch
+) -> None:
+    """macOS gives a GUI app a minimal PATH with no Homebrew on it.
+
+    Launched from the Dock, the only interpreter on PATH is the system
+    Python 3.9, so selection used to fail with "No supported Python 3.12
+    interpreter was found" even though a supported one was installed.
+    """
+
+    from pathlib import Path as _Path
+
+    from tree_counter.qgis_adapter.runtime_process import QProcessRunner
+    from tree_counter.runtime.installer import RuntimeInstaller
+    from tree_counter.runtime.paths import RuntimePaths
+
+    monkeypatch.setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+    installer = RuntimeInstaller(
+        paths=RuntimePaths(tmp_path / "runtime"),
+        runner=QProcessRunner(),
+        lock_root=_Path("tree_counter/runtime/locks").resolve(),
+    )
+
+    probe = installer.select_host_python()
+
+    assert probe.version.startswith("3.12.")
+    assert probe.is_supported
