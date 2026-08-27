@@ -13,6 +13,7 @@ try:
     from scripts.check_publication import (
         PACKAGE_MANIFEST,
         PACKAGE_NAME,
+        SOURCE_ONLY_FILES,
         validate_archive,
         validate_source,
     )
@@ -20,6 +21,7 @@ except ModuleNotFoundError:  # Direct ``python3 scripts/package_plugin.py``.
     from check_publication import (  # type: ignore[no-redef]
         PACKAGE_MANIFEST,
         PACKAGE_NAME,
+        SOURCE_ONLY_FILES,
         validate_archive,
         validate_source,
     )
@@ -37,6 +39,8 @@ def _package_files(package: Path) -> list[Path]:
         ):
             raise ValueError(f"forbidden cache or bytecode file: {path}")
         if not path.is_file():
+            continue
+        if relative.as_posix() in SOURCE_ONLY_FILES:
             continue
         if relative.as_posix() not in PACKAGE_MANIFEST:
             raise ValueError(

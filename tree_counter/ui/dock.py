@@ -24,6 +24,7 @@ from tree_counter.constants import (
     TILE_SIZE_MULTIPLE,
 )
 from tree_counter.core.types import InferenceSettings
+from tree_counter.i18n import tr
 from tree_counter.qgis_adapter.scope import ScopeKind
 from tree_counter.ui.controller import CountingController, Phase
 from tree_counter.ui.widgets import (
@@ -66,7 +67,7 @@ def build_dock(
 
     from qgis.PyQt import QtWidgets
 
-    dock = _dock_base()(DOCK_TITLE, parent)
+    dock = _dock_base()(tr(DOCK_TITLE), parent)
     dock.setObjectName(DOCK_OBJECT_NAME)
 
     container = QtWidgets.QWidget()
@@ -74,41 +75,41 @@ def build_dock(
     outer.setContentsMargins(8, 8, 8, 8)
 
     header = QtWidgets.QHBoxLayout()
-    runtime_label = QtWidgets.QLabel("Runtime: unknown")
+    runtime_label = QtWidgets.QLabel(tr("Runtime: unknown"))
     runtime_button = QtWidgets.QToolButton()
-    runtime_button.setText("Runtime Manager")
+    runtime_button.setText(tr("Runtime Manager"))
     header.addWidget(runtime_label)
     header.addStretch(1)
     header.addWidget(runtime_button)
     outer.addLayout(header)
 
-    data = CollapsibleSection(SECTION_TITLES[0], expanded=True)
+    data = CollapsibleSection(tr(SECTION_TITLES[0]), expanded=True)
     raster_combo = QtWidgets.QComboBox()
     scope_combo = QtWidgets.QComboBox()
     for label, _ in SCOPE_CHOICES:
-        scope_combo.addItem(label)
+        scope_combo.addItem(tr(label))
     polygon_combo = QtWidgets.QComboBox()
     polygon_combo.setEnabled(False)
-    data.add_row("Raster", raster_combo)
-    data.add_row("Scope", scope_combo)
-    data.add_row("Polygon layer", polygon_combo)
+    data.add_row(tr("Raster"), raster_combo)
+    data.add_row(tr("Scope"), scope_combo)
+    data.add_row(tr("Polygon layer"), polygon_combo)
     outer.addWidget(data.widget)
 
-    model = CollapsibleSection(SECTION_TITLES[1], expanded=True)
+    model = CollapsibleSection(tr(SECTION_TITLES[1]), expanded=True)
     model_path = QtWidgets.QLineEdit()
     model_path.setReadOnly(True)
-    model_path.setPlaceholderText("Choose a .onnx or trusted .pt model")
-    browse = QtWidgets.QPushButton("Browse...")
-    trust_button = QtWidgets.QPushButton("Confirm this checkpoint")
+    model_path.setPlaceholderText(tr("Choose a .onnx or trusted .pt model"))
+    browse = QtWidgets.QPushButton(tr("Browse..."))
+    trust_button = QtWidgets.QPushButton(tr("Confirm this checkpoint"))
     trust_button.setVisible(False)
     classes = make_class_list()
-    model.add_row("Model", model_path)
+    model.add_row(tr("Model"), model_path)
     model.add_widget(browse)
     model.add_widget(trust_button)
-    model.add_row("Classes", classes)
+    model.add_row(tr("Classes"), classes)
     outer.addWidget(model.widget)
 
-    detection = CollapsibleSection(SECTION_TITLES[2], expanded=True)
+    detection = CollapsibleSection(tr(SECTION_TITLES[2]), expanded=True)
     defaults = InferenceSettings()
     confidence = make_double_control(0.0, 1.0, 0.05, defaults.confidence)
     nms_iou = make_double_control(0.0, 1.0, 0.05, defaults.nms_iou)
@@ -118,39 +119,40 @@ def build_dock(
     overlap = make_int_control(
         MIN_OVERLAP_PERCENT, MAX_OVERLAP_PERCENT, 5, defaults.overlap_percent
     )
-    detection.add_row("Confidence", confidence)
-    detection.add_row("NMS IoU", nms_iou)
-    detection.add_row("Tile size", tile_size)
-    detection.add_row("Overlap %", overlap)
+    detection.add_row(tr("Confidence"), confidence)
+    detection.add_row(tr("NMS IoU"), nms_iou)
+    detection.add_row(tr("Tile size"), tile_size)
+    detection.add_row(tr("Overlap %"), overlap)
 
     # Advanced stays folded: these are the settings a user should not need.
-    advanced = CollapsibleSection("Advanced", expanded=False)
+    advanced = CollapsibleSection(tr("Advanced"), expanded=False)
     duplicate_iou = make_double_control(
         0.0, 1.0, 0.05, defaults.duplicate_iou
     )
     device = QtWidgets.QComboBox()
     device.addItems(["auto", "cpu"])
-    advanced.add_row("Duplicate IoU", duplicate_iou)
-    advanced.add_row("Device", device)
+    advanced.add_row(tr("Duplicate IoU"), duplicate_iou)
+    advanced.add_row(tr("Device"), device)
     detection.add_widget(advanced.widget)
     outer.addWidget(detection.widget)
 
-    output = CollapsibleSection(SECTION_TITLES[3], expanded=True)
+    output = CollapsibleSection(tr(SECTION_TITLES[3]), expanded=True)
     output_path = QtWidgets.QLineEdit()
-    output_path.setPlaceholderText("Where results are written")
-    write_centers = QtWidgets.QCheckBox("Tree centres")
+    output_path.setPlaceholderText(tr("Where results are written"))
+    write_centers = QtWidgets.QCheckBox(tr("Tree centres"))
     write_centers.setChecked(True)
-    write_boxes = QtWidgets.QCheckBox("Detection boxes")
-    output.add_row("Output", output_path)
+    write_boxes = QtWidgets.QCheckBox(tr("Detection boxes"))
+    output.add_row(tr("Output"), output_path)
     output.add_widget(write_centers)
     output.add_widget(write_boxes)
     outer.addWidget(output.widget)
 
-    run = CollapsibleSection(SECTION_TITLES[4], expanded=True)
-    primary = QtWidgets.QPushButton("Start counting")
+    run = CollapsibleSection(tr(SECTION_TITLES[4]), expanded=True)
+    primary = QtWidgets.QPushButton(tr("Start counting"))
     primary.setEnabled(False)
     progress = QtWidgets.QProgressBar()
     progress.setRange(0, 100)
+    progress.setAccessibleName(tr("Progress"))
     status = QtWidgets.QLabel("")
     status.setWordWrap(True)
     results = QtWidgets.QLabel("")
@@ -266,7 +268,9 @@ def render(dock: Any, state: Any) -> None:
     """Update every widget from a controller state."""
 
     parts = dock.tree_counter
-    parts["runtime_label"].setText(f"Runtime: {state.runtime_state}")
+    parts["runtime_label"].setText(
+        tr("Runtime: {state}").format(state=state.runtime_state)
+    )
     parts["polygon_combo"].setEnabled(state.scope is ScopeKind.POLYGON)
 
     model = state.model
@@ -285,29 +289,32 @@ def render(dock: Any, state: Any) -> None:
         set_class_items(parts["classes"], names, state.selected_class_ids)
         parts["classes"].blockSignals(False)
 
-    parts["primary"].setText(
-        "Cancel" if state.primary_action == "cancel" else "Start counting"
-    )
+    if state.primary_action == "cancel":
+        parts["primary"].setText(tr("Cancel"))
+    else:
+        parts["primary"].setText(tr("Start counting"))
     parts["primary"].setEnabled(
         state.can_start or state.phase is Phase.RUNNING
     )
     parts["progress"].setValue(state.progress_percent)
 
-    lines = [state.message] if state.message else []
-    lines.extend(state.warnings)
+    lines = [tr(state.message)] if state.message else []
+    lines.extend(tr(warning) for warning in state.warnings)
     parts["status"].setText("\n".join(lines))
 
     if state.phase is Phase.COMPLETED:
-        summary = [f"Total: {state.total_count}"]
+        summary = [tr("Total: {total}").format(total=state.total_count)]
         summary.extend(
             f"{name}: {count}"
             for name, count in state.counts_by_class.items()
         )
-        summary.append(f"Output: {state.output_path}")
+        summary.append(tr("Output: {path}").format(path=state.output_path))
         parts["results"].setText("\n".join(summary))
     elif state.phase is Phase.RUNNING:
         parts["results"].setText(
-            f"Tile {state.completed_tiles} of {state.total_tiles}"
+            tr("Tile {done} of {total}").format(
+                done=state.completed_tiles, total=state.total_tiles
+            )
         )
     else:
         parts["results"].setText("")

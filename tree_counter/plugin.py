@@ -39,6 +39,7 @@ class TreeCounterPlugin:
         self._controller: Any = None
         self._model_path: str | None = None
         self._task: Any = None
+        self._translator: Any = None
 
     # -- QGIS lifecycle --------------------------------------------------
 
@@ -48,6 +49,7 @@ class TreeCounterPlugin:
         from qgis.PyQt.QtGui import QIcon
         from qgis.PyQt.QtWidgets import QAction
 
+        self._translator = self._install_translator()
         icon = QIcon(str(icon_path()))
         self.action = QAction(icon, ACTION_TEXT, self.iface.mainWindow())
         self.action.setObjectName("TreeCounterAction")
@@ -62,6 +64,11 @@ class TreeCounterPlugin:
         if self._task is not None:
             self._task.cancel()
             self._task = None
+        if self._translator is not None:
+            from qgis.PyQt.QtCore import QCoreApplication
+
+            QCoreApplication.instance().removeTranslator(self._translator)
+            self._translator = None
         if self.action is not None:
             self.iface.removePluginMenu(MENU_TITLE, self.action)
             self.iface.removeToolBarIcon(self.action)
@@ -124,6 +131,13 @@ class TreeCounterPlugin:
         )
 
     # -- services --------------------------------------------------------
+
+    def _install_translator(self) -> Any:
+        from qgis.PyQt.QtCore import QCoreApplication
+
+        from tree_counter.i18n import install_translator
+
+        return install_translator(QCoreApplication.instance())
 
     def _runtime_status(self) -> str:
         try:

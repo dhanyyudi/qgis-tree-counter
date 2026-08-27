@@ -37,6 +37,8 @@ PACKAGE_MANIFEST = (
     "core/types.py",
     "core/validation.py",
     "errors.py",
+    "i18n/__init__.py",
+    "i18n/tree_counter_id.qm",
     "icons/tree_counter.svg",
     "metadata.txt",
     "plugin.py",
@@ -84,6 +86,12 @@ PACKAGE_MANIFEST = (
     "worker/yolo_postprocess.py",
 )
 MANDATORY_FILES = PACKAGE_MANIFEST
+# Source files that live in the package tree for development but are never
+# shipped. The hand-maintained Qt Linguist source stays out of the archive;
+# only its compiled .qm is a distributable asset.
+SOURCE_ONLY_FILES = {
+    "i18n/tree_counter_id.ts",
+}
 EXPECTED_METADATA = {
     "name": "Tree Counter",
     "description": (
@@ -356,7 +364,7 @@ def validate_source(repo_root: Path) -> list[str]:
         if forbidden:
             errors.append(forbidden)
         manifest_error = _manifest_error(relative_path)
-        if manifest_error:
+        if manifest_error and relative_path not in SOURCE_ONLY_FILES:
             errors.append(manifest_error)
         try:
             content_error = _content_error(relative_path, path.read_bytes())

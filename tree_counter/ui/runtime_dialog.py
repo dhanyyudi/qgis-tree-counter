@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from tree_counter.i18n import tr
 from tree_counter.runtime.paths import RuntimeState
 
 DIALOG_OBJECT_NAME = "TreeCounterRuntimeManager"
@@ -164,7 +165,7 @@ class RuntimeManagerDialog:
 
         self.widget = QtWidgets.QDialog(parent)
         self.widget.setObjectName(DIALOG_OBJECT_NAME)
-        self.widget.setWindowTitle(DIALOG_TITLE)
+        self.widget.setWindowTitle(tr(DIALOG_TITLE))
         layout = QtWidgets.QVBoxLayout(self.widget)
 
         self.status_label = QtWidgets.QLabel("")
@@ -182,7 +183,7 @@ class RuntimeManagerDialog:
         self.buttons: dict[str, Any] = {}
         row = QtWidgets.QHBoxLayout()
         for action, label in ACTION_LABELS.items():
-            button = QtWidgets.QPushButton(label)
+            button = QtWidgets.QPushButton(tr(label))
             button.setEnabled(False)
             button.clicked.connect(
                 lambda _checked=False, name=action: self.run_action(name)
@@ -191,7 +192,7 @@ class RuntimeManagerDialog:
             row.addWidget(button)
         layout.addLayout(row)
 
-        self.logs_button = QtWidgets.QPushButton("Open logs")
+        self.logs_button = QtWidgets.QPushButton(tr("Open logs"))
         self.logs_button.clicked.connect(self.open_logs)
         layout.addWidget(self.logs_button)
 
@@ -205,17 +206,24 @@ class RuntimeManagerDialog:
         status = self._installer.inspect()
         self.status_label.setText(describe_status(status))
         self.location_label.setText(
-            f"Install location: {self._installer._paths.root}"
+            tr("Install location: {root}").format(
+                root=self._installer._paths.root
+            )
         )
         offers = self._offers()
         self.components.setText(
             "\n".join(
-                f"{'Recommended' if offer.recommended else 'Optional'}: "
-                f"{offer.title} - about {offer.estimated_size} "
-                f"from {offer.source}"
+                "{}: {} - about {} from {}".format(
+                    tr("Recommended")
+                    if offer.recommended
+                    else tr("Optional"),
+                    offer.title,
+                    offer.estimated_size,
+                    offer.source,
+                )
                 for offer in offers
             )
-            or "No runtime component is available for this platform."
+            or tr("No runtime component is available for this platform.")
         )
         for action, button in self.buttons.items():
             button.setEnabled(
@@ -257,7 +265,7 @@ class RuntimeManagerDialog:
         except Exception as error:
             self.status_label.setText(
                 f"{getattr(error, 'user_message', str(error))}\n"
-                "The previous runtime was kept."
+                + tr("The previous runtime was kept.")
             )
             return False
         self.refresh()
@@ -298,7 +306,7 @@ class RuntimeManagerDialog:
 
         logs = Path(self._installer._paths.logs)
         if not logs.is_dir():
-            self.status_label.setText("There are no runtime logs yet.")
+            self.status_label.setText(tr("There are no runtime logs yet."))
             return False
         return bool(
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(logs)))
@@ -309,7 +317,7 @@ class RuntimeManagerDialog:
 
         answer = QMessageBox.question(
             self.widget,
-            DIALOG_TITLE,
+            tr(DIALOG_TITLE),
             text,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
