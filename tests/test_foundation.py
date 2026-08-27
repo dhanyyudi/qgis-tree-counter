@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "tree_counter"
 
 
-def test_class_factory_constructs_inert_shell_and_preserves_iface() -> None:
+def test_class_factory_constructs_the_plugin_and_preserves_iface() -> None:
     import tree_counter
 
     from tree_counter.plugin import TreeCounterPlugin
@@ -25,10 +25,12 @@ def test_class_factory_constructs_inert_shell_and_preserves_iface() -> None:
     sentinel_iface = object()
     plugin = tree_counter.classFactory(sentinel_iface)
 
+    # Construction must not touch QGIS; the dock and the toolbar action
+    # are created in initGui, which the QGIS tests exercise for real.
     assert isinstance(plugin, TreeCounterPlugin)
     assert plugin.iface is sentinel_iface
-    assert plugin.initGui() is None
-    assert plugin.unload() is None
+    assert plugin.dock is None
+    assert plugin.action is None
 
 
 def test_metadata_uses_the_public_plugin_identity() -> None:
@@ -102,28 +104,35 @@ def test_class_factory_imports_plugin_lazily() -> None:
     )
 
 
-def test_shell_is_inert_and_does_not_import_non_qgis_ui_dependencies() -> None:
+def test_the_plugin_imports_qt_only_through_qgis() -> None:
+    """Qt must never be imported directly, or the single package breaks.
+
+    One archive has to load under Qt5 and Qt6, which only holds while
+    every Qt import goes through qgis.PyQt.
+    """
+
     source = (PACKAGE / "plugin.py").read_text(encoding="utf-8")
     module = ast.parse(source)
 
-    def is_allowed_qgis_pyqt(name: str | None) -> bool:
-        return bool(name) and (
-            name == "qgis.PyQt" or name.startswith("qgis.PyQt.")
-        )
+    def is_allowed(name: str | None) -> bool:
+        if not name:
+            return False
+        if name == "qgis.PyQt" or name.startswith("qgis.PyQt."):
+            return True
+        if name == "tree_counter" or name.startswith("tree_counter."):
+            return True
+        return name in ("__future__", "pathlib", "typing")
 
     for node in ast.walk(module):
         if isinstance(node, ast.Import):
-            assert all(
-                is_allowed_qgis_pyqt(alias.name) for alias in node.names
+            assert all(is_allowed(alias.name) for alias in node.names), (
+                [alias.name for alias in node.names]
             )
         elif isinstance(node, ast.ImportFrom):
-            assert is_allowed_qgis_pyqt(node.module)
+            assert is_allowed(node.module), node.module
 
-    assert "requests" not in source
-    assert "urllib" not in source
-    assert "subprocess" not in source
-    assert "QDockWidget" not in source
-    assert "addToolBarIcon" not in source
+    for forbidden in ("PyQt5", "PyQt6", "requests", "urllib", "subprocess"):
+        assert forbidden not in source, forbidden
 
     class_names = {
         node.name
