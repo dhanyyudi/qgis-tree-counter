@@ -335,3 +335,48 @@ def test_the_runtime_button_opens_the_manager(qgis_application) -> None:
 
     assert opened == [1]
     dock.setParent(None)
+
+
+def test_browse_asks_the_host_to_choose_a_model(qgis_application) -> None:
+    """The Browse button was created but never connected to anything.
+
+    Without this the only way to select a model was unavailable, so a run
+    could never start no matter what else the user set.
+    """
+
+    from tree_counter.ui.dock import build_dock
+
+    chosen: list[int] = []
+    dock = build_dock(_controller(), choose_model=lambda: chosen.append(1))
+    try:
+        dock.tree_counter["browse"].click()
+    finally:
+        dock.setParent(None)
+
+    assert chosen == [1]
+
+
+def test_the_dock_lists_the_offered_layers(qgis_application) -> None:
+    """Both layer combos are populated from the project."""
+
+    from tree_counter.ui.dock import (
+        build_dock,
+        set_polygon_choices,
+        set_raster_choices,
+    )
+
+    dock = build_dock(_controller())
+    try:
+        set_raster_choices(dock, ("aerial", "orthophoto"))
+        set_polygon_choices(dock, ("blocks",))
+        raster = dock.tree_counter["raster_combo"]
+        polygon = dock.tree_counter["polygon_combo"]
+
+        assert [
+            raster.itemText(index) for index in range(raster.count())
+        ] == ["aerial", "orthophoto"]
+        assert [
+            polygon.itemText(index) for index in range(polygon.count())
+        ] == ["blocks"]
+    finally:
+        dock.setParent(None)

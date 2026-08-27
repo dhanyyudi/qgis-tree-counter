@@ -45,12 +45,18 @@ def test_metadata_uses_the_public_plugin_identity() -> None:
         "Count trees in georeferenced aerial imagery with user-provided "
         "YOLO models."
     )
-    assert values["about"] == (
-        "Open-source QGIS plugin foundation for local tree counting in "
-        "georeferenced aerial imagery. Under active development; contains "
-        "no inference runtime; contains no external ML dependencies; not "
-        "ready for production use."
-    )
+    # The exact wording is locked in scripts/check_publication.py; what
+    # matters here is that every disclosure a user needs before installing
+    # is actually present in the text QGIS shows them.
+    from scripts.check_publication import REQUIRED_ABOUT_DISCLOSURES
+
+    about = values["about"].lower()
+    missing = [
+        phrase
+        for phrase, _message in REQUIRED_ABOUT_DISCLOSURES
+        if phrase not in about
+    ]
+    assert missing == [], f"about text is missing: {missing}"
     assert values["version"] == "0.1.0"
     assert values["author"] == "Dhany Yudi Prasetyo"
     assert values["email"] == "dhanyyudi.prasetyo@gmail.com"

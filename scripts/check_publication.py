@@ -45,6 +45,7 @@ PACKAGE_MANIFEST = (
     "qgis_adapter/__init__.py",
     "qgis_adapter/georeference.py",
     "qgis_adapter/launcher.py",
+    "qgis_adapter/layers.py",
     "qgis_adapter/output.py",
     "qgis_adapter/process.py",
     "qgis_adapter/raster.py",
@@ -100,10 +101,17 @@ EXPECTED_METADATA = {
         "YOLO models."
     ),
     "about": (
-        "Open-source QGIS plugin foundation for local tree counting in "
-        "georeferenced aerial imagery. Under active development; contains "
-        "no inference runtime; contains no external ML dependencies; "
-        "not ready for production use."
+        "Counts trees in georeferenced aerial imagery using detection "
+        "models you supply. Processing is local: imagery and models never "
+        "leave your machine, and the plugin sends no telemetry. Accepts "
+        "Ultralytics YOLO11 detection models as .onnx exports or .pt "
+        "checkpoints; loading a .pt checkpoint executes code from that "
+        "file, so each one must be confirmed by its hash before it is "
+        "used. No inference runtime is bundled: ONNX Runtime, PyTorch and "
+        "Ultralytics are installed on demand into a per-user directory "
+        "from the Runtime Manager, which is the only part of the plugin "
+        "that uses the network. Results are written as GeoPackage layers "
+        "with run provenance. Experimental and under active development."
     ),
     "version": "0.1.0",
     "author": "Dhany Yudi Prasetyo",
@@ -121,6 +129,33 @@ EXPECTED_METADATA = {
     "hasprocessingprovider": "no",
     "server": "False",
 }
+# What a user must be told before installing, stated in the About text the
+# QGIS plugin manager shows. Each entry is checked literally, so softening
+# the wording fails the gate rather than passing quietly.
+REQUIRED_ABOUT_DISCLOSURES = (
+    ("under active development", "that this build is experimental"),
+    (
+        "no inference runtime is bundled",
+        "that no inference runtime ships with the plugin",
+    ),
+    (
+        "installed on demand",
+        "that the ML dependencies are installed separately",
+    ),
+    (
+        "must be confirmed by its hash",
+        "that a .pt checkpoint executes code and needs confirmation",
+    ),
+    (
+        "never leave your machine",
+        "that imagery and models are processed locally",
+    ),
+    (
+        "only part of the plugin that uses the network",
+        "which feature can reach the network",
+    ),
+    ("sends no telemetry", "that no telemetry is collected"),
+)
 FORBIDDEN_EXTENSIONS = {
     ".pt",
     ".pth",
@@ -205,23 +240,9 @@ def _metadata_errors(values: configparser.SectionProxy) -> list[str]:
             errors.append(
                 f"metadata {key} must equal the locked foundation value"
             )
-    if "active development" not in about:
-        errors.append("metadata about must disclose active development status")
-    if "no inference runtime" not in about:
-        errors.append(
-            "metadata about must disclose that this build has no inference "
-            "runtime"
-        )
-    if "no external ml dependencies" not in about:
-        errors.append(
-            "metadata about must disclose that this build has no external "
-            "ML dependencies"
-        )
-    if "not ready for production use" not in about:
-        errors.append(
-            "metadata about must disclose that this build is not ready for "
-            "production use"
-        )
+    for phrase, message in REQUIRED_ABOUT_DISCLOSURES:
+        if phrase not in about:
+            errors.append(f"metadata about must disclose {message}")
     return errors
 
 

@@ -64,6 +64,7 @@ def build_dock(
     controller: CountingController,
     parent: Any = None,
     open_runtime_manager: Any = None,
+    choose_model: Any = None,
 ) -> Any:
     """Return the Tree Counter dock bound to *controller*."""
 
@@ -199,13 +200,16 @@ def build_dock(
         "sections": (data, model, detection, output, run),
     }
 
-    _wire(dock, controller, open_runtime_manager)
+    _wire(dock, controller, open_runtime_manager, choose_model)
     controller.subscribe(lambda state: render(dock, state))
     return dock
 
 
 def _wire(
-    dock: Any, controller: CountingController, open_runtime: Any
+    dock: Any,
+    controller: CountingController,
+    open_runtime: Any,
+    choose_model: Any = None,
 ) -> None:
     parts = dock.tree_counter
 
@@ -246,6 +250,8 @@ def _wire(
             parts["write_boxes"].isChecked(),
         )
 
+    if choose_model is not None:
+        parts["browse"].clicked.connect(lambda _checked=False: choose_model())
     parts["raster_combo"].currentTextChanged.connect(controller.set_raster)
     parts["scope_combo"].currentIndexChanged.connect(on_scope)
     parts["polygon_combo"].currentTextChanged.connect(

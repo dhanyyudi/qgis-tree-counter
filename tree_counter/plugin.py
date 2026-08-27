@@ -20,6 +20,8 @@ from tree_counter.errors import ErrorCode, TreeCounterError
 
 MENU_TITLE = "&Tree Counter"
 ACTION_TEXT = "Tree Counter"
+MODEL_DIALOG_TITLE = "Choose a detection model"
+MODEL_FILE_FILTER = "Detection models (*.onnx *.pt)"
 ICON_RELATIVE = "icons/tree_counter.svg"
 
 
@@ -107,11 +109,53 @@ class TreeCounterPlugin:
         from tree_counter.ui.dock import build_dock
 
         self._controller = self._build_controller()
-        return build_dock(
+        dock = build_dock(
             self._controller,
             parent=self.iface.mainWindow(),
             open_runtime_manager=self.show_runtime_manager,
+            choose_model=self.choose_model,
         )
+        self._connect_project(dock)
+        return dock
+
+    def _connect_project(self, dock: Any) -> None:
+        """Keep the layer combos in step with the QGIS project."""
+
+        from tree_counter.qgis_adapter.layers import connect_layer_changes
+
+        self._refresh_layer_choices(dock)
+        connect_layer_changes(lambda: self._refresh_layer_choices(dock))
+
+    @staticmethod
+    def _refresh_layer_choices(dock: Any) -> None:
+        """Offer exactly the layers the plugin can actually use."""
+
+        from tree_counter.qgis_adapter.layers import (
+            polygon_layer_names,
+            raster_layer_names,
+        )
+        from tree_counter.ui.dock import (
+            set_polygon_choices,
+            set_raster_choices,
+        )
+
+        set_raster_choices(dock, raster_layer_names())
+        set_polygon_choices(dock, polygon_layer_names())
+
+    def choose_model(self) -> str:
+        """Ask for a model file and hand it to the controller."""
+
+        from qgis.PyQt.QtWidgets import QFileDialog
+
+        path, _filter = QFileDialog.getOpenFileName(
+            self.iface.mainWindow(),
+            MODEL_DIALOG_TITLE,
+            "",
+            MODEL_FILE_FILTER,
+        )
+        if path and self._controller is not None:
+            self._controller.select_model(path)
+        return str(path or "")
 
     def _build_controller(self) -> Any:
         from tree_counter.settings.presets import PresetStore
