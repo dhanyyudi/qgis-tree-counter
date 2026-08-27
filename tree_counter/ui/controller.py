@@ -183,6 +183,7 @@ class CountingController:
         runtime_status: Callable[[], str] | None = None,
         start_run: Callable[[ViewState], None] | None = None,
         cancel_run: Callable[[], None] | None = None,
+        start_model_inspection: Callable[[Any], None] | None = None,
     ) -> None:
         self._identify_model = identify_model
         self._inspect_model = inspect_model
@@ -191,6 +192,7 @@ class CountingController:
         self._runtime_status = runtime_status or (lambda: "not_installed")
         self._start_run = start_run
         self._cancel_run = cancel_run
+        self._start_model_inspection = start_model_inspection
         self._listeners: list[Listener] = []
         self._identity: Any = None
         self._state = ViewState(runtime_state=self._runtime_status())
@@ -310,10 +312,21 @@ class CountingController:
         return self._inspect()
 
     def _inspect(self) -> ViewState:
+        if self._start_model_inspection is not None:
+            try:
+                self._start_model_inspection(self._identity)
+            except TreeCounterError as error:
+                return self._fail(error)
+            return self._state
         try:
             info = self._inspect_model(self._identity)
         except TreeCounterError as error:
             return self._fail(error)
+        return self.on_model_inspected(info)
+
+    def on_model_inspected(self, info: Mapping[str, Any]) -> ViewState:
+        """Apply model information delivered by a background task."""
+
         names = tuple(str(name) for name in info.get("class_names", ()))
         if not names:
             return self._fail(
@@ -338,6 +351,11 @@ class CountingController:
             message="",
         )
         return self._apply_preset(state)
+
+    def on_model_inspection_failed(self, error: Any) -> ViewState:
+        """Apply a background model-inspection failure."""
+
+        return self._fail(error)
 
     def _apply_preset(self, state: ViewState) -> ViewState:
         if self._preset_store is None or self._identity is None:

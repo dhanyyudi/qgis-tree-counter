@@ -15,6 +15,7 @@ the exchange rather than being absorbed indefinitely.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from time import monotonic
 from typing import Any, Protocol, runtime_checkable
 
 from tree_counter.core.protocol import (
@@ -31,6 +32,7 @@ DEFAULT_READ_TIMEOUT_MS = 120_000
 DEFAULT_START_TIMEOUT_MS = 60_000
 CANCEL_GRACE_MS = 5_000
 MAX_STDERR_BYTES = 256 * 1024
+CANCEL_POLL_MS = 100
 
 
 class WorkerProcessError(TreeCounterError):
@@ -103,6 +105,13 @@ class WorkerChannel:
                 f"the worker could not be started: {type(exc).__name__}"
             ) from exc
         self._started = True
+
+    def set_cancel_check(self, callback: Any) -> None:
+        """Let a transport observe cancellation on its owning thread."""
+
+        setter = getattr(self._transport, "set_cancel_check", None)
+        if setter is not None:
+            setter(callback)
 
     def send(self, message: Mapping[str, Any]) -> None:
         """Validate and write one host message."""
@@ -203,6 +212,12 @@ class QProcessTransport:
     def __init__(self) -> None:
         self._process: Any = None
         self._buffer = bytearray()
+        self._should_cancel: Any = lambda: False
+
+    def set_cancel_check(self, callback: Any) -> None:
+        """Install a thread-safe predicate checked between Qt waits."""
+
+        self._should_cancel = callback
 
     def start(self, program: str, arguments: Sequence[str]) -> None:
         """Start the worker without going through a shell."""
@@ -235,7 +250,10 @@ class QProcessTransport:
 
         if self._process is None:
             raise WorkerProcessError("the worker is not running")
+        deadline = monotonic() + max(0, timeout_ms) / 1000
         while True:
+            if self._should_cancel():
+                raise WorkerProcessError("the worker read was cancelled")
             index = self._buffer.find(b"\n")
             if index >= 0:
                 line = bytes(self._buffer[: index + 1])
@@ -243,12 +261,18 @@ class QProcessTransport:
                 return line
             if len(self._buffer) > MAX_MESSAGE_BYTES:
                 raise ProtocolError("the worker sent an oversized line")
-            if not self._process.waitForReadyRead(timeout_ms):
+            remaining_ms = max(0, int((deadline - monotonic()) * 1000))
+            if remaining_ms == 0:
+                return None
+            wait_ms = min(CANCEL_POLL_MS, remaining_ms)
+            if not self._process.waitForReadyRead(wait_ms):
                 chunk = bytes(self._process.readAllStandardOutput())
                 if chunk:
                     self._buffer.extend(chunk)
                     continue
-                return None
+                if not self.is_running():
+                    return None
+                continue
             self._buffer.extend(bytes(self._process.readAllStandardOutput()))
 
     def read_stderr(self) -> bytes:
@@ -288,6 +312,7 @@ class QProcessTransport:
 
 __all__ = [
     "CANCEL_GRACE_MS",
+    "CANCEL_POLL_MS",
     "DEFAULT_READ_TIMEOUT_MS",
     "MAX_STDERR_BYTES",
     "QProcessTransport",

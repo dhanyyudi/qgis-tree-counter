@@ -19,7 +19,11 @@ from pathlib import Path
 
 import pytest
 
-from scripts.run_local_integration import selected_backends, selected_scope
+from scripts.run_local_integration import (
+    runtime_interpreter,
+    selected_backends,
+    selected_scope,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RASTER_VARIABLE = "TREE_COUNTER_TEST_RASTER"
@@ -56,10 +60,7 @@ def release_real_raster_layers(qgis_application):
 
 
 def _runtime_python() -> Path | None:
-    from tree_counter.runtime.paths import default_runtime_root
-
-    candidate = default_runtime_root() / "active" / "bin" / "python"
-    return candidate if candidate.is_file() else None
+    return runtime_interpreter()
 
 
 def _require(variable: str) -> Path:

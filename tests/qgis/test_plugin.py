@@ -168,6 +168,22 @@ def test_the_output_request_honours_the_chosen_layers(
     assert request.directory == tmp_path
 
 
+def test_a_saved_project_supplies_the_default_output_directory(
+    plugin, tmp_path
+) -> None:
+    from qgis.core import QgsProject
+
+    instance, _iface = plugin
+    project = QgsProject.instance()
+    previous = project.fileName()
+    project.setFileName(str(tmp_path / "trees.qgz"))
+    try:
+        instance.show_dock()
+        assert instance._controller.state.output_path == str(tmp_path)
+    finally:
+        project.setFileName(previous)
+
+
 def test_a_task_terminating_after_unload_does_not_reach_the_controller(
     plugin,
 ) -> None:

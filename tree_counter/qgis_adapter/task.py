@@ -215,6 +215,11 @@ class CountingRun:
         started = self._await(run_id, "run_started", result)
         result.backend = str(started.get("backend", ""))
         result.device = str(started.get("device", ""))
+        result.provider = str(started.get("provider", ""))
+        for warning in started.get("warnings", ()):
+            text = str(warning)
+            result.warnings = result.warnings + (text,)
+            self._on_event({"type": "warning", "message": text})
 
     def _process_tile(
         self,
@@ -462,26 +467,14 @@ class CountingTask(QgsTask):
             if should_cancel is not None
             else (lambda: self._cancelled)
         )
+        self._channel.set_cancel_check(self._should_cancel)
         self._started_at = ""
 
     def cancel(self) -> bool:
-        """Stop the run, interrupting a blocking worker read.
-
-        During tile inference the run sits inside a blocking
-        ``WorkerChannel.receive()``. A flag alone is not observed until
-        that read returns - up to the read timeout - so Cancel would look
-        stuck and then surface as a worker failure. Closing the channel
-        makes the read return now; the run sees the cancellation flag and
-        reports a cancellation.
-        """
+        """Request cancellation without touching the worker-thread process."""
 
         self._cancelled = True
-        channel = getattr(self, "_channel", None)
-        if channel is not None:
-            try:
-                channel.close()
-            except (TreeCounterError, OSError):
-                pass
+        super().cancel()
         return True
 
     def run(self) -> bool:
@@ -576,10 +569,74 @@ class CountingTask(QgsTask):
         return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+class ModelInspectionTask(QgsTask):
+    """Inspect one model in a task-owned worker process."""
+
+    if pyqtSignal is not None:
+        progress_event = pyqtSignal(dict)
+        warning_event = pyqtSignal(dict)
+        terminal_event = pyqtSignal(dict)
+
+    def __init__(
+        self,
+        description: str,
+        identity: Any,
+        inspect: Callable[[Any, CancelCheck], Mapping[str, Any]],
+    ) -> None:
+        if pyqtSignal is None:
+            raise RuntimeError("ModelInspectionTask requires QGIS")
+        super().__init__(description, QgsTask.Flag.CanCancel)
+        self._identity = identity
+        self._inspect = inspect
+        self._cancelled = False
+
+    def cancel(self) -> bool:
+        """Request cancellation without crossing QProcess thread affinity."""
+
+        self._cancelled = True
+        super().cancel()
+        return True
+
+    def run(self) -> bool:
+        """Run inspection and emit one plain-dictionary terminal event."""
+
+        try:
+            info = self._inspect(
+                self._identity, lambda: self._cancelled
+            )
+        except TreeCounterError as error:
+            if self._cancelled:
+                self.terminal_event.emit({"type": "cancelled"})
+            else:
+                self.terminal_event.emit(
+                    {"type": "failed", "error": error}
+                )
+            return False
+        except Exception as error:
+            if self._cancelled:
+                self.terminal_event.emit({"type": "cancelled"})
+            else:
+                self.terminal_event.emit(
+                    {
+                        "type": "failed",
+                        "error": RunFailed(
+                            ErrorCode.WORKER_PROCESS_FAILURE,
+                            f"{type(error).__name__}: {error}",
+                        ),
+                    }
+                )
+            return False
+        self.terminal_event.emit(
+            {"type": "completed", "info": dict(info)}
+        )
+        return True
+
+
 __all__ = [
     "TILE_ENCODING",
     "CountingRun",
     "CountingTask",
+    "ModelInspectionTask",
     "RunCancelled",
     "RunFailed",
     "RunRequest",

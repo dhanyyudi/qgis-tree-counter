@@ -105,6 +105,26 @@ def test_a_complete_selection_enables_start() -> None:
     assert state.selected_class_ids == (0,)
 
 
+def test_async_model_inspection_keeps_the_controller_busy_until_delivery(
+) -> None:
+    requested: list[object] = []
+    controller = _controller(start_model_inspection=requested.append)
+
+    state = controller.select_model("/models/best.onnx")
+
+    assert state.phase.value == "inspecting"
+    assert state.model is not None and state.model.inspected is False
+    assert len(requested) == 1
+
+    state = controller.on_model_inspected(
+        {"class_names": ["oil_palm"], "backend": "onnxruntime"}
+    )
+
+    assert state.phase.value == "ready"
+    assert state.model is not None and state.model.inspected is True
+    assert state.selected_class_ids == (0,)
+
+
 def test_a_single_class_model_selects_its_class() -> None:
     controller = _controller(class_names=("oil_palm",))
 

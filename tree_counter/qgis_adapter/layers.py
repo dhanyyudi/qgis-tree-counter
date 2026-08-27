@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from tree_counter.errors import TreeCounterError
 from tree_counter.qgis_adapter.raster import validate_layer
 
 
@@ -32,7 +31,10 @@ def is_usable_raster(layer: Any) -> bool:
         return False
     try:
         validate_layer(layer)
-    except TreeCounterError:
+    except Exception:
+        # Provider plugins can raise their own exception types while a
+        # layer is opening or disappearing. Eligibility is a UI boundary:
+        # an unusable layer is omitted rather than crashing the dock.
         return False
     return True
 
@@ -69,24 +71,51 @@ def polygon_layer_names() -> tuple[str, ...]:
     )
 
 
-def connect_layer_changes(callback: Any) -> None:
+def project_file_name() -> str:
+    """Return the current saved project filename, or an empty string."""
+
+    from qgis.core import QgsProject
+
+    return str(QgsProject.instance().fileName() or "")
+
+
+def connect_layer_changes(callback: Any) -> tuple[tuple[Any, Any], ...]:
     """Call *callback* whenever the set of project layers changes."""
 
     from qgis.core import QgsProject
 
     project = QgsProject.instance()
+
+    def handler(*_args: Any) -> None:
+        callback()
+
+    connections = []
     for signal in (
         project.layersAdded,
         project.layersRemoved,
         project.cleared,
     ):
-        signal.connect(lambda *_args: callback())
+        signal.connect(handler)
+        connections.append((signal, handler))
+    return tuple(connections)
+
+
+def disconnect_layer_changes(connections: Any) -> None:
+    """Disconnect handles returned by :func:`connect_layer_changes`."""
+
+    for signal, handler in tuple(connections or ()):
+        try:
+            signal.disconnect(handler)
+        except (TypeError, RuntimeError):
+            pass
 
 
 __all__ = [
     "connect_layer_changes",
+    "disconnect_layer_changes",
     "is_polygon_layer",
     "is_usable_raster",
     "polygon_layer_names",
+    "project_file_name",
     "raster_layer_names",
 ]

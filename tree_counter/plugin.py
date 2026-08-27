@@ -42,6 +42,10 @@ class TreeCounterPlugin:
         self._controller: Any = None
         self._model_path: str | None = None
         self._task: Any = None
+        self._task_bridge: Any = None
+        self._inspection_task: Any = None
+        self._inspection_bridge: Any = None
+        self._layer_connections: Any = ()
         self._translator: Any = None
 
     # -- QGIS lifecycle --------------------------------------------------
@@ -68,12 +72,24 @@ class TreeCounterPlugin:
             # The task keeps running after unload and will emit its
             # terminal event later. Leaving it connected would call back
             # into a controller this method is about to drop.
-            try:
-                self._task.terminal_event.disconnect(self._on_terminal)
-            except (TypeError, RuntimeError):
-                pass
+            if self._task_bridge is not None:
+                self._task_bridge.dispose(self._task)
             self._task.cancel()
             self._task = None
+            self._task_bridge = None
+        if self._inspection_task is not None:
+            if self._inspection_bridge is not None:
+                self._inspection_bridge.dispose(self._inspection_task)
+            self._inspection_task.cancel()
+            self._inspection_task = None
+            self._inspection_bridge = None
+        if self._layer_connections:
+            from tree_counter.qgis_adapter.layers import (
+                disconnect_layer_changes,
+            )
+
+            disconnect_layer_changes(self._layer_connections)
+            self._layer_connections = ()
         if self._translator is not None:
             from qgis.PyQt.QtCore import QCoreApplication
 
@@ -110,6 +126,7 @@ class TreeCounterPlugin:
         from tree_counter.ui.dock import build_dock
 
         self._controller = self._build_controller()
+        self._set_default_output_directory()
         dock = build_dock(
             self._controller,
             parent=self.iface.mainWindow(),
@@ -126,7 +143,20 @@ class TreeCounterPlugin:
         from tree_counter.qgis_adapter.layers import connect_layer_changes
 
         self._refresh_layer_choices(dock)
-        connect_layer_changes(lambda: self._refresh_layer_choices(dock))
+        self._layer_connections = connect_layer_changes(
+            lambda: self._refresh_layer_choices(dock)
+        )
+
+    def _set_default_output_directory(self) -> None:
+        """Use the saved QGIS project's directory when one is available."""
+
+        if self._controller is None or self._controller.state.output_path:
+            return
+        from tree_counter.qgis_adapter.layers import project_file_name
+
+        filename = project_file_name()
+        if filename:
+            self._controller.set_output_path(Path(filename).parent)
 
     @staticmethod
     def _refresh_layer_choices(dock: Any) -> None:
@@ -197,6 +227,7 @@ class TreeCounterPlugin:
             runtime_status=self._runtime_status,
             start_run=self._start_run,
             cancel_run=self._cancel_run,
+            start_model_inspection=self._start_model_inspection,
         )
 
     # -- services --------------------------------------------------------
@@ -229,7 +260,9 @@ class TreeCounterPlugin:
             self._installer().inspect(), self._runtime_paths()
         )
 
-    def _inspect_model(self, identity: Any) -> dict:
+    def _inspect_model(
+        self, identity: Any, should_cancel: Any = lambda: False
+    ) -> dict:
         """Inspect a model in the isolated worker and return its info.
 
         A worker that rejects the model answers with an ``error`` message;
@@ -252,6 +285,7 @@ class TreeCounterPlugin:
             )
         command = self._worker_command()
         channel = WorkerChannel(QProcessTransport())
+        channel.set_cancel_check(should_cancel)
         try:
             channel.start(command[0], command[1:])
             channel.send(
@@ -274,6 +308,37 @@ class TreeCounterPlugin:
             return self._expect(channel.receive(), "model_info")
         finally:
             channel.close()
+
+    def _start_model_inspection(self, identity: Any) -> None:
+        """Submit isolated model inspection without blocking the dock."""
+
+        from tree_counter.qgis_adapter.task import ModelInspectionTask
+        from tree_counter.qgis_adapter.task_events import TaskEventBridge
+        from tree_counter.qgis_adapter.task_manager import add_task
+
+        task = ModelInspectionTask(
+            f"Inspect {identity.filename}", identity, self._inspect_model
+        )
+        parent = self.iface.mainWindow() if self.iface is not None else None
+        bridge = TaskEventBridge(parent)
+        bridge.terminal_event.connect(self._on_model_terminal)
+        bridge.connect_task(task)
+        self._inspection_task = task
+        self._inspection_bridge = bridge
+        add_task(task)
+
+    def _on_model_terminal(self, event: dict) -> None:
+        if self._inspection_task is not None and self._inspection_bridge:
+            self._inspection_bridge.dispose(self._inspection_task)
+        self._inspection_task = None
+        self._inspection_bridge = None
+        if self._controller is None:
+            return
+        kind = str(event.get("type", ""))
+        if kind == "completed":
+            self._controller.on_model_inspected(event.get("info", {}))
+        elif kind == "failed":
+            self._controller.on_model_inspection_failed(event.get("error"))
 
     @staticmethod
     def _expect(message: Any, wanted: str) -> dict:
@@ -338,16 +403,21 @@ class TreeCounterPlugin:
         """Build a counting task from the dock state and hand it to QGIS."""
 
         from tree_counter.qgis_adapter.task_manager import add_task
+        from tree_counter.qgis_adapter.task_events import TaskEventBridge
 
         try:
             task = self._build_task(state)
         except TreeCounterError as error:
             self._controller.on_failed(error)
             return
-        task.progress_event.connect(self._controller.on_event)
-        task.warning_event.connect(self._controller.on_event)
-        task.terminal_event.connect(self._on_terminal)
+        parent = self.iface.mainWindow() if self.iface is not None else None
+        bridge = TaskEventBridge(parent)
+        bridge.progress_event.connect(self._controller.on_event)
+        bridge.warning_event.connect(self._controller.on_event)
+        bridge.terminal_event.connect(self._on_terminal)
+        bridge.connect_task(task)
         self._task = task
+        self._task_bridge = bridge
         add_task(task)
 
     def _cancel_run(self) -> None:
@@ -358,7 +428,10 @@ class TreeCounterPlugin:
 
     def _on_terminal(self, event: dict) -> None:
         kind = str(event.get("type", ""))
+        if self._task is not None and self._task_bridge is not None:
+            self._task_bridge.dispose(self._task)
         self._task = None
+        self._task_bridge = None
         if self._controller is None:
             return
         if kind == "completed":

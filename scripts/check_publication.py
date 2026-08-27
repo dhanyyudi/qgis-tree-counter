@@ -53,6 +53,7 @@ PACKAGE_MANIFEST = (
     "qgis_adapter/runtime_process.py",
     "qgis_adapter/scope.py",
     "qgis_adapter/task.py",
+    "qgis_adapter/task_events.py",
     "qgis_adapter/task_manager.py",
     "qgis_adapter/workspace.py",
     "runtime/__init__.py",

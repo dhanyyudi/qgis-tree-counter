@@ -76,3 +76,19 @@ def test_an_empty_project_offers_nothing(project) -> None:
 
     assert raster_layer_names() == ()
     assert polygon_layer_names() == ()
+
+
+def test_layer_change_connections_can_be_disconnected(project) -> None:
+    from tree_counter.qgis_adapter.layers import (
+        connect_layer_changes,
+        disconnect_layer_changes,
+    )
+
+    calls: list[int] = []
+    connections = connect_layer_changes(lambda: calls.append(1))
+
+    project.layersAdded.emit([])
+    disconnect_layer_changes(connections)
+    project.layersAdded.emit([])
+
+    assert calls == [1]
