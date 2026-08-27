@@ -140,7 +140,23 @@ class TrustStore:
         # A record damaged by hand-editing must not grant trust.
         if not isinstance(record, Mapping):
             return None
-        if not isinstance(record.get("filename"), str):
+        if set(record) != {"filename", "confirmed_at"}:
+            return None
+        filename = record["filename"]
+        confirmed_at = record["confirmed_at"]
+        if (
+            not isinstance(filename, str)
+            or not filename
+            or "/" in filename
+            or "\\" in filename
+            or filename in (".", "..")
+        ):
+            return None
+        if (
+            isinstance(confirmed_at, bool)
+            or not isinstance(confirmed_at, int)
+            or confirmed_at < 0
+        ):
             return None
         return record
 
