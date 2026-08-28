@@ -1,4 +1,4 @@
-"""Tests for the public Tree Counter plugin foundation."""
+"""Tests for the public Tree Counter plugin identity and release files."""
 
 # SPDX-License-Identifier: AGPL-3.0-only
 
@@ -45,12 +45,18 @@ def test_metadata_uses_the_public_plugin_identity() -> None:
         "Count trees in georeferenced aerial imagery with user-provided "
         "YOLO models."
     )
-    assert values["about"] == (
-        "Open-source QGIS plugin foundation for local tree counting in "
-        "georeferenced aerial imagery. Under active development; contains "
-        "no inference runtime; contains no external ML dependencies; not "
-        "ready for production use."
-    )
+    # The exact wording is locked in scripts/check_publication.py; what
+    # matters here is that every disclosure a user needs before installing
+    # is actually present in the text QGIS shows them.
+    from scripts.check_publication import REQUIRED_ABOUT_DISCLOSURES
+
+    about = values["about"].lower()
+    missing = [
+        phrase
+        for phrase, _message in REQUIRED_ABOUT_DISCLOSURES
+        if phrase not in about
+    ]
+    assert missing == [], f"about text is missing: {missing}"
     assert values["version"] == "0.1.0"
     assert values["author"] == "Dhany Yudi Prasetyo"
     assert values["email"] == "dhanyyudi.prasetyo@gmail.com"
@@ -77,6 +83,52 @@ def test_root_and_package_licenses_are_identical() -> None:
     assert root_license.is_file()
     assert package_license.is_file()
     assert root_license.read_bytes() == package_license.read_bytes()
+
+
+def test_root_and_package_third_party_notices_are_identical() -> None:
+    root_notices = ROOT / "THIRD_PARTY_NOTICES.md"
+    package_notices = PACKAGE / "THIRD_PARTY_NOTICES.md"
+
+    assert root_notices.is_file()
+    assert package_notices.is_file()
+    assert root_notices.read_bytes() == package_notices.read_bytes()
+
+
+def test_public_release_docs_describe_the_implemented_plugin() -> None:
+    english = (ROOT / "README.md").read_text(encoding="utf-8").casefold()
+    indonesian = (ROOT / "README.id.md").read_text(
+        encoding="utf-8"
+    ).casefold()
+    changelog = (ROOT / "CHANGELOG.md").read_text(
+        encoding="utf-8"
+    ).casefold()
+    checklist = (ROOT / "RELEASE_CHECKLIST.md").read_text(
+        encoding="utf-8"
+    ).casefold()
+
+    for text in (english, indonesian):
+        for phrase in (
+            "runtime manager",
+            "tree_centers",
+            "detection_boxes",
+            "run_summary",
+            "python 3.12",
+            "onnx",
+            ".pt",
+        ):
+            assert phrase in text
+
+    for stale in (
+        "foundation only",
+        "fondasi plugin publik",
+        "direncanakan untuk rilis mendatang",
+    ):
+        assert stale not in english
+        assert stale not in indonesian
+
+    assert "## [0.1.0]" in changelog
+    assert "runtime manager" in changelog
+    assert "qgis plugin repository security scan" in checklist
 
 
 def test_class_factory_imports_plugin_lazily() -> None:

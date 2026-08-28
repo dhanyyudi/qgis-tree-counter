@@ -383,5 +383,41 @@
         <source>Activating the runtime</source>
         <translation>Mengaktifkan runtime</translation>
     </message>
+    <message>
+        <source>Choose a raster layer to count trees in.</source>
+        <translation>Pilih layer raster untuk menghitung pohon.</translation>
+    </message>
+    <message>
+        <source>Choose a detection model.</source>
+        <translation>Pilih model deteksi.</translation>
+    </message>
+    <message>
+        <source>Waiting for the model to be inspected.</source>
+        <translation>Menunggu model selesai diperiksa.</translation>
+    </message>
+    <message>
+        <source>Confirm this PyTorch checkpoint before it can be used.</source>
+        <translation>Konfirmasi checkpoint PyTorch ini sebelum dapat digunakan.</translation>
+    </message>
+    <message>
+        <source>Select at least one class to count.</source>
+        <translation>Pilih setidaknya satu kelas untuk dihitung.</translation>
+    </message>
+    <message>
+        <source>Install the Tree Counter runtime first.</source>
+        <translation>Pasang runtime Tree Counter terlebih dahulu.</translation>
+    </message>
+    <message>
+        <source>Choose the polygon layer that defines the scope.</source>
+        <translation>Pilih layer poligon yang menentukan cakupan.</translation>
+    </message>
+    <message>
+        <source>Select at least one output layer.</source>
+        <translation>Pilih setidaknya satu layer keluaran.</translation>
+    </message>
+    <message>
+        <source>Choose where to write the results.</source>
+        <translation>Pilih lokasi penulisan hasil.</translation>
+    </message>
 </context>
 </TS>

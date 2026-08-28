@@ -33,6 +33,31 @@ def _required_commands(workflow: str) -> None:
         assert command in workflow, f"workflow omits required gate: {command}"
 
 
+def _required_bytecode_policy(workflow: str) -> None:
+    assert re.search(
+        r"(?m)^env:\s*\n\s+PYTHONDONTWRITEBYTECODE:\s*['\"]1['\"]\s*$",
+        workflow,
+    ), "workflow may create package bytecode before publication validation"
+
+
+def _required_archive_scanner(workflow: str, occurrences: int) -> None:
+    assert workflow.count("Scan exact ZIP with QGIS security tools") == (
+        occurrences
+    )
+    assert "python -m zipfile -e" in workflow
+    assert (
+        "python -m bandit --ini .bandit -r "
+        "build/qgis-security-scan/tree_counter"
+    ) in workflow
+    assert (
+        "python -m flake8 --isolated --max-line-length=120 "
+        "build/qgis-security-scan/tree_counter"
+    ) in workflow
+    assert (
+        "find build/qgis-security-scan/tree_counter -type f -print0"
+    ) in workflow
+
+
 def _required_blocking_scanners(workflow: str) -> None:
     detect_secrets_command = (
         "git ls-files -z | xargs -0 detect-secrets-hook --baseline "
@@ -57,6 +82,8 @@ def test_quality_workflow_has_blocking_triggers_permissions_gates_and_artifact(
     assert re.search(r"(?m)^\s+contents:\s*read\s*$", workflow)
     assert "python-version: '3.12'" in workflow
     _required_commands(workflow)
+    _required_bytecode_policy(workflow)
+    _required_archive_scanner(workflow, 1)
     assert "actions/upload-artifact" in workflow
     archive_pattern = (
         "dist/tree_counter-${{ steps.version.outputs."
@@ -88,6 +115,8 @@ def test_release_workflow_is_tagged_minimal_and_repeats_quality_gates(
     assert "gh release create" in workflow
     assert "tree_counter-${{ steps.version.outputs.version }}.zip" in workflow
     _required_commands(workflow)
+    _required_bytecode_policy(workflow)
+    _required_archive_scanner(workflow, 2)
     assert "name: tree-counter-plugin" not in workflow
     assert "plugins.qgis.org" not in workflow.lower()
     assert "OSGEO" not in workflow.upper()

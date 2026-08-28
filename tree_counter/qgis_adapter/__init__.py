@@ -1,7 +1,7 @@
 """QGIS-facing adapters. Every QGIS import in the plugin lives here.
 
 The plugin entry point must never import ``qgis.core`` itself: the
-foundation gate checks that ``plugin.py`` only reaches Qt through
+publication gate checks that ``plugin.py`` only reaches Qt through
 ``qgis.PyQt``. The two host services the plugin needs but cannot import
 are exposed here, with their QGIS imports deferred into the call.
 """
@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from tree_counter.qgis_adapter.task_manager import add_task
+
 
 def map_layers_named(name: str) -> list[Any]:
     """Return every loaded map layer with the given name."""
@@ -19,14 +21,6 @@ def map_layers_named(name: str) -> list[Any]:
     from qgis.core import QgsProject
 
     return QgsProject.instance().mapLayersByName(str(name))
-
-
-def add_task(task: Any) -> None:
-    """Hand a task to the QGIS task manager."""
-
-    from qgis.core import QgsApplication
-
-    QgsApplication.taskManager().addTask(task)
 
 
 __all__ = ["add_task", "map_layers_named"]

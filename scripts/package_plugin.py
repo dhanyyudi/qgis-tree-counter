@@ -44,7 +44,7 @@ def _package_files(package: Path) -> list[Path]:
             continue
         if relative.as_posix() not in PACKAGE_MANIFEST:
             raise ValueError(
-                "package file is not allowed by the foundation manifest: "
+                "package file is not allowed by the release manifest: "
                 f"{path}"
             )
         files.append(path)

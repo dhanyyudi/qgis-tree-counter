@@ -11,12 +11,19 @@ never runs in CI.
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import os
 import subprocess
 from pathlib import Path
 
 import pytest
+
+from scripts.run_local_integration import (
+    runtime_interpreter,
+    selected_backends,
+    selected_scope,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RASTER_VARIABLE = "TREE_COUNTER_TEST_RASTER"
@@ -36,16 +43,24 @@ WINDOW = (9600, 7000, 10880, 8280)
 TILE_SIZE = 640
 OVERLAP_PERCENT = 20
 GRACE_MS = 5000
+SELECTED_SCOPE = selected_scope()
+SELECTED_BACKENDS = selected_backends()
 # Qt5 segfaults when a QgsRasterLayer is collected during interpreter
 # teardown, so the layer is kept alive for the whole session.
 _LAYERS: list = []
 
 
-def _runtime_python() -> Path | None:
-    from tree_counter.runtime.paths import default_runtime_root
+@pytest.fixture(scope="module", autouse=True)
+def release_real_raster_layers(qgis_application):
+    """Release GDAL layers while QGIS is still alive on Qt5."""
 
-    candidate = default_runtime_root() / "active" / "bin" / "python"
-    return candidate if candidate.is_file() else None
+    yield
+    _LAYERS.clear()
+    gc.collect()
+
+
+def _runtime_python() -> Path | None:
+    return runtime_interpreter()
 
 
 def _require(variable: str) -> Path:
@@ -158,7 +173,7 @@ def make_run(qgis_application, tmp_path):
         return CountingRun(channel, RasterReader(layer, info), workspace)
 
     try:
-        yield build
+        yield build, info, layer.crs()
     finally:
         for channel, workspace in opened:
             workspace.close()
@@ -169,16 +184,23 @@ def make_run(qgis_application, tmp_path):
 def real_run(make_run):
     """Yield a run bound to the real raster, model and runtime."""
 
-    return make_run(), _require(MODEL_VARIABLE)
+    build, _info, _crs = make_run
+    backend = SELECTED_BACKENDS[0]
+    variable = MODEL_VARIABLE if backend == "pt" else ONNX_VARIABLE
+    return build(), _require(variable), backend
 
 
-def _request(model: Path, run_id: str = "run-real"):
+def _request(
+    model: Path,
+    run_id: str = "run-real",
+    window: tuple[int, int, int, int] = WINDOW,
+):
     from tree_counter.core.types import InferenceSettings
     from tree_counter.qgis_adapter.scope import PixelScope, ScopeKind
     from tree_counter.qgis_adapter.task import RunRequest
 
     return RunRequest(
-        scope=PixelScope(ScopeKind.WHOLE_RASTER, *WINDOW),
+        scope=PixelScope(ScopeKind.WHOLE_RASTER, *window),
         settings=InferenceSettings(
             tile_size=TILE_SIZE, overlap_percent=OVERLAP_PERCENT
         ),
@@ -188,15 +210,19 @@ def _request(model: Path, run_id: str = "run-real"):
     )
 
 
+@pytest.mark.skipif(
+    SELECTED_SCOPE != "bounded", reason="the full-raster soak was selected"
+)
 def test_a_real_model_counts_trees_in_a_real_raster(real_run) -> None:
     """The whole stack produces real detections on real imagery."""
 
-    run, model = real_run
+    run, model, backend = real_run
 
     result = run.execute(_request(model))
 
     assert result.total_count > 0, "the model found no trees at all"
-    assert result.backend == "ultralytics"
+    expected_backend = "ultralytics" if backend == "pt" else "onnxruntime"
+    assert result.backend == expected_backend
     assert result.tile_count == 9
     print(
         f"\nREAL RUN: {result.total_count} trees, "
@@ -208,12 +234,15 @@ def test_a_real_model_counts_trees_in_a_real_raster(real_run) -> None:
     assert counts["oil_palm"] == result.total_count
 
 
+@pytest.mark.skipif(
+    SELECTED_SCOPE != "bounded", reason="the full-raster soak was selected"
+)
 def test_every_detection_falls_inside_the_requested_window(
     real_run,
 ) -> None:
     """A centre outside the scope would place a tree on the wrong ground."""
 
-    run, model = real_run
+    run, model, _backend = real_run
     column_min, row_min, column_max, row_max = WINDOW
 
     result = run.execute(_request(model))
@@ -226,12 +255,15 @@ def test_every_detection_falls_inside_the_requested_window(
         assert row_min <= center_y <= row_max
 
 
+@pytest.mark.skipif(
+    SELECTED_SCOPE != "bounded", reason="the full-raster soak was selected"
+)
 def test_no_duplicate_survives_the_iou_threshold(real_run) -> None:
     """Overlapping tiles must not count the same palm twice."""
 
     from tree_counter.core.nms import overlaps_at_threshold
 
-    run, model = real_run
+    run, model, _backend = real_run
     request = _request(model)
 
     result = run.execute(request)
@@ -243,6 +275,9 @@ def test_no_duplicate_survives_the_iou_threshold(real_run) -> None:
             assert not overlaps_at_threshold(left, right, threshold)
 
 
+@pytest.mark.skipif(
+    SELECTED_SCOPE != "bounded", reason="the full-raster soak was selected"
+)
 def test_the_onnx_export_agrees_with_the_checkpoint(make_run) -> None:
     """The same weights must count the same trees through either backend.
 
@@ -251,11 +286,14 @@ def test_the_onnx_export_agrees_with_the_checkpoint(make_run) -> None:
     documented tolerance rather than for exact equality.
     """
 
+    if set(SELECTED_BACKENDS) != {"pt", "onnx"}:
+        pytest.skip("select both pt and onnx to run backend parity")
+    build, _info, _crs = make_run
     checkpoint = _require(MODEL_VARIABLE)
     exported = _require(ONNX_VARIABLE)
 
-    torch_result = make_run(0).execute(_request(checkpoint, "run-pt"))
-    onnx_result = make_run(1).execute(_request(exported, "run-onnx"))
+    torch_result = build(0).execute(_request(checkpoint, "run-pt"))
+    onnx_result = build(1).execute(_request(exported, "run-onnx"))
 
     print(
         f"\nPARITY: pt={torch_result.total_count} "
@@ -268,4 +306,84 @@ def test_the_onnx_export_agrees_with_the_checkpoint(make_run) -> None:
     assert onnx_result.total_count > 0
     assert abs(onnx_result.total_count - torch_result.total_count) <= (
         PARITY_TOLERANCE
+    )
+
+
+@pytest.mark.skipif(
+    SELECTED_SCOPE != "full", reason="the bounded integration was selected"
+)
+@pytest.mark.parametrize("backend", SELECTED_BACKENDS)
+def test_full_raster_soak_writes_a_valid_geopackage(
+    make_run, backend: str
+) -> None:
+    """Process the complete raster and publish auditable spatial output."""
+
+    from datetime import datetime, timezone
+
+    from qgis.core import QgsVectorLayer
+
+    from tree_counter.qgis_adapter.output import (
+        OutputRequest,
+        build_summary,
+        output_timestamp,
+        resolve_target,
+        validate_geopackage,
+        write_results,
+    )
+
+    build, info, crs = make_run
+    variable = MODEL_VARIABLE if backend == "pt" else ONNX_VARIABLE
+    model = _require(variable)
+    window = (0, 0, info.width, info.height)
+    request = _request(model, f"run-full-{backend}", window)
+    result = build().execute(request)
+
+    output_value = os.environ.get("TREE_COUNTER_TEST_OUTPUT_DIR", "").strip()
+    if not output_value:
+        pytest.skip("set TREE_COUNTER_TEST_OUTPUT_DIR for the full soak")
+    output_directory = Path(output_value)
+    output_directory.mkdir(parents=True, exist_ok=True)
+    output_request = OutputRequest(
+        directory=output_directory,
+        raster_stem=f"tree_counter_full_{backend}",
+        write_centers=True,
+        write_boxes=True,
+        timestamp=output_timestamp(),
+    )
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    summary = build_summary(
+        run_id=result.run_id,
+        status="completed",
+        raster_info=info,
+        scope=request.scope,
+        settings=request.settings,
+        result=result,
+        model_filename=model.name,
+        model_sha256=request.model_sha256,
+        started_at=now,
+        finished_at=now,
+    )
+    target = write_results(
+        resolve_target(output_request),
+        output_request,
+        info,
+        result.detections,
+        summary,
+        crs,
+    )
+
+    validate_geopackage(
+        target, ["tree_centers", "detection_boxes", "run_summary"]
+    )
+    centers = QgsVectorLayer(
+        f"{target}|layername=tree_centers", "tree_centers", "ogr"
+    )
+    assert centers.isValid()
+    assert result.total_count > 0
+    assert centers.featureCount() == result.total_count
+    assert result.tile_count > 9
+    print(
+        f"\nFULL SOAK: backend={result.backend}, device={result.device}, "
+        f"trees={result.total_count}, tiles={result.tile_count}, "
+        f"duration={result.duration_seconds:.1f}s"
     )

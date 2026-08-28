@@ -45,6 +45,22 @@ class Phase(str, Enum):
         return self in (Phase.INSPECTING, Phase.RUNNING)
 
 
+# Why Start is not available yet, in the order the panel is filled in. A
+# disabled button with no explanation is a dead end: everything else can
+# be set correctly and Start still stays grey.
+BLOCKING_REASONS = {
+    "raster": "Choose a raster layer to count trees in.",
+    "model": "Choose a detection model.",
+    "inspecting": "Waiting for the model to be inspected.",
+    "trust": "Confirm this PyTorch checkpoint before it can be used.",
+    "classes": "Select at least one class to count.",
+    "runtime": "Install the Tree Counter runtime first.",
+    "polygon": "Choose the polygon layer that defines the scope.",
+    "layers": "Select at least one output layer.",
+    "output": "Choose where to write the results.",
+}
+
+
 @dataclass(frozen=True)
 class ModelChoice:
     """A chosen model, once it has been hashed and inspected."""
@@ -109,6 +125,30 @@ class ViewState:
         return bool(self.output_path)
 
     @property
+    def blocking_reason(self) -> str:
+        """Return why Start is unavailable, or an empty string."""
+
+        if not self.raster_name:
+            return BLOCKING_REASONS["raster"]
+        if self.model is None:
+            return BLOCKING_REASONS["model"]
+        if self.model.needs_trust and not self.model.trusted:
+            return BLOCKING_REASONS["trust"]
+        if not self.model.inspected:
+            return BLOCKING_REASONS["inspecting"]
+        if not self.selected_class_ids:
+            return BLOCKING_REASONS["classes"]
+        if self.runtime_state != "ready":
+            return BLOCKING_REASONS["runtime"]
+        if self.scope is ScopeKind.POLYGON and not self.polygon_layer_name:
+            return BLOCKING_REASONS["polygon"]
+        if not (self.write_centers or self.write_boxes):
+            return BLOCKING_REASONS["layers"]
+        if not self.output_path:
+            return BLOCKING_REASONS["output"]
+        return ""
+
+    @property
     def primary_action(self) -> str:
         """Return whether the main button starts or cancels."""
 
@@ -143,6 +183,7 @@ class CountingController:
         runtime_status: Callable[[], str] | None = None,
         start_run: Callable[[ViewState], None] | None = None,
         cancel_run: Callable[[], None] | None = None,
+        start_model_inspection: Callable[[Any], None] | None = None,
     ) -> None:
         self._identify_model = identify_model
         self._inspect_model = inspect_model
@@ -151,6 +192,7 @@ class CountingController:
         self._runtime_status = runtime_status or (lambda: "not_installed")
         self._start_run = start_run
         self._cancel_run = cancel_run
+        self._start_model_inspection = start_model_inspection
         self._listeners: list[Listener] = []
         self._identity: Any = None
         self._state = ViewState(runtime_state=self._runtime_status())
@@ -270,10 +312,21 @@ class CountingController:
         return self._inspect()
 
     def _inspect(self) -> ViewState:
+        if self._start_model_inspection is not None:
+            try:
+                self._start_model_inspection(self._identity)
+            except TreeCounterError as error:
+                return self._fail(error)
+            return self._state
         try:
             info = self._inspect_model(self._identity)
         except TreeCounterError as error:
             return self._fail(error)
+        return self.on_model_inspected(info)
+
+    def on_model_inspected(self, info: Mapping[str, Any]) -> ViewState:
+        """Apply model information delivered by a background task."""
+
         names = tuple(str(name) for name in info.get("class_names", ()))
         if not names:
             return self._fail(
@@ -298,6 +351,11 @@ class CountingController:
             message="",
         )
         return self._apply_preset(state)
+
+    def on_model_inspection_failed(self, error: Any) -> ViewState:
+        """Apply a background model-inspection failure."""
+
+        return self._fail(error)
 
     def _apply_preset(self, state: ViewState) -> ViewState:
         if self._preset_store is None or self._identity is None:
@@ -442,6 +500,7 @@ class CountingController:
 
 
 __all__ = [
+    "BLOCKING_REASONS",
     "CountingController",
     "ModelChoice",
     "Phase",

@@ -4,6 +4,11 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from types import ModuleType
+
 import pytest
 
 
@@ -163,6 +168,22 @@ def test_the_output_request_honours_the_chosen_layers(
     assert request.directory == tmp_path
 
 
+def test_a_saved_project_supplies_the_default_output_directory(
+    plugin, tmp_path
+) -> None:
+    from qgis.core import QgsProject
+
+    instance, _iface = plugin
+    project = QgsProject.instance()
+    previous = project.fileName()
+    project.setFileName(str(tmp_path / "trees.qgz"))
+    try:
+        instance.show_dock()
+        assert instance._controller.state.output_path == str(tmp_path)
+    finally:
+        project.setFileName(previous)
+
+
 def test_a_task_terminating_after_unload_does_not_reach_the_controller(
     plugin,
 ) -> None:
@@ -207,3 +228,134 @@ class _FakeSignal:
     def emit(self, payload: dict) -> None:
         for slot in list(self._slots):
             slot(payload)
+
+
+def test_start_run_does_not_depend_on_a_cached_package_reexport(
+    qgis_application, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plugin reload may retain the old qgis_adapter package object."""
+
+    import tree_counter.qgis_adapter as current_adapter
+    from tree_counter.plugin import TreeCounterPlugin
+
+    stale_adapter = ModuleType("tree_counter.qgis_adapter")
+    stale_adapter.__path__ = list(current_adapter.__path__)
+    monkeypatch.setitem(
+        sys.modules, "tree_counter.qgis_adapter", stale_adapter
+    )
+
+    submitted: list[object] = []
+    task_manager = ModuleType("tree_counter.qgis_adapter.task_manager")
+    task_manager.add_task = submitted.append
+    monkeypatch.setitem(
+        sys.modules,
+        "tree_counter.qgis_adapter.task_manager",
+        task_manager,
+    )
+
+    class FakeTask:
+        progress_event = _FakeSignal()
+        warning_event = _FakeSignal()
+        terminal_event = _FakeSignal()
+
+    class FakeController:
+        on_event = staticmethod(lambda event: None)
+        on_failed = staticmethod(lambda error: None)
+
+    plugin = TreeCounterPlugin(None)
+    plugin._controller = FakeController()
+    task = FakeTask()
+    monkeypatch.setattr(plugin, "_build_task", lambda state: task)
+
+    plugin._start_run(object())
+
+    assert submitted == [task]
+
+
+def test_a_provider_preflight_exception_restores_the_controller(
+    qgis_application, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tree_counter.errors import ErrorCode
+    from tree_counter.plugin import TreeCounterPlugin
+
+    failures: list[object] = []
+
+    class FakeController:
+        on_failed = failures.append
+
+    plugin = TreeCounterPlugin(None)
+    plugin._controller = FakeController()
+    monkeypatch.setattr(
+        plugin,
+        "_build_task",
+        lambda _state: (_ for _ in ()).throw(OSError("provider vanished")),
+    )
+
+    plugin._start_run(object())
+
+    assert len(failures) == 1
+    assert failures[0].code is ErrorCode.INVALID_RASTER
+
+
+def test_the_dedicated_task_manager_adapter_is_packaged() -> None:
+    """Task submission must remain importable after a package hot reload."""
+
+    import tree_counter
+
+    adapter = (
+        Path(tree_counter.__file__).resolve().parent
+        / "qgis_adapter"
+        / "task_manager.py"
+    )
+
+    assert adapter.is_file()
+
+
+@pytest.mark.parametrize(
+    ("write_centers", "write_boxes", "expected_layers"),
+    [
+        (True, False, ["tree_centers"]),
+        (False, True, ["detection_boxes"]),
+        (True, True, ["tree_centers", "detection_boxes"]),
+    ],
+)
+def test_a_completed_run_loads_the_requested_result_layers(
+    qgis_application,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    write_centers: bool,
+    write_boxes: bool,
+    expected_layers: list[str],
+) -> None:
+    from tree_counter.plugin import TreeCounterPlugin
+    from tree_counter.qgis_adapter import output
+
+    loaded: list[tuple[Path, list[str]]] = []
+    monkeypatch.setattr(
+        output,
+        "load_result_layers",
+        lambda path, names: loaded.append((path, list(names))),
+    )
+
+    class FakeController:
+        state = SimpleNamespace(
+            write_centers=write_centers,
+            write_boxes=write_boxes,
+        )
+
+        def on_completed(self, result, output_path) -> None:
+            pass
+
+    plugin = TreeCounterPlugin(None)
+    plugin._controller = FakeController()
+    output_path = tmp_path / "counting.gpkg"
+
+    plugin._on_terminal(
+        {
+            "type": "completed",
+            "result": object(),
+            "output_path": str(output_path),
+        }
+    )
+
+    assert loaded == [(output_path, expected_layers)]

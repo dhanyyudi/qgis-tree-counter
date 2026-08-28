@@ -59,6 +59,7 @@ OWNERSHIP_MARKER = {
 }
 PROCESS_TIMEOUT_SECONDS = 3600.0
 VENV_TIMEOUT_SECONDS = 300.0
+SELF_CHECK_MARKER = "TREE_COUNTER_SELF_CHECK:"
 
 # A fixed literal. Nothing from the catalog or the user is interpolated.
 SELF_CHECK_SOURCE = (
@@ -90,8 +91,9 @@ SELF_CHECK_SOURCE = (
     "except Exception:\n"
     "    pass\n"
     "\n"
-    "print(json.dumps({'python_version':'.'.join(str(item) for item in "
-    "sys.version_info[:3]),'versions':versions,'accelerators':accelerators}))"
+    "print('TREE_COUNTER_SELF_CHECK:'+json.dumps({'python_version':'.'.join("
+    "str(item) for item in sys.version_info[:3]),'versions':versions,"
+    "'accelerators':accelerators}))"
 )
 
 _SECRET_PATTERNS = (
@@ -649,8 +651,23 @@ class RuntimeInstaller:
             VENV_TIMEOUT_SECONDS,
             "verify the runtime",
         )
+        marker_count = result.stdout.count(SELF_CHECK_MARKER)
+        if marker_count:
+            marker_length = len(SELF_CHECK_MARKER)
+            marked_payloads = [
+                line.strip()[marker_length:].strip()
+                for line in result.stdout.splitlines()
+                if line.strip().startswith(SELF_CHECK_MARKER)
+            ]
+            if marker_count != 1 or len(marked_payloads) != 1:
+                raise InstallError(
+                    "the runtime self-check returned ambiguous output"
+                )
+            payload = marked_payloads[0]
+        else:
+            payload = result.stdout
         try:
-            report = json.loads(result.stdout)
+            report = json.loads(payload)
         except ValueError as exc:
             raise InstallError(
                 f"the runtime self-check returned unreadable output: {exc}"

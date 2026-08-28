@@ -427,6 +427,43 @@ class TestFailures:
 
         workspace.close()
 
+    def test_run_started_records_provider_and_warnings(
+        self, tmp_path: Path
+    ) -> None:
+        replies = _happy_replies()
+
+        def started(message):
+            return [
+                {
+                    "type": "run_started",
+                    "protocol_version": PROTOCOL,
+                    "request_id": message["request_id"],
+                    "run_id": message["run_id"],
+                    "backend": "onnxruntime",
+                    "device": "cpu",
+                    "provider": "CPUExecutionProvider",
+                    "warnings": ["CoreML was unavailable; using CPU."],
+                }
+            ]
+
+        replies["start_run"] = started
+        events: list[dict] = []
+        transport = ScriptedTransport(replies)
+        run, workspace = _run(tmp_path, transport, on_event=events.append)
+
+        result = run.execute(_request())
+
+        assert result.provider == "CPUExecutionProvider"
+        assert result.warnings == ("CoreML was unavailable; using CPU.",)
+        warnings = [event for event in events if event["type"] == "warning"]
+        assert warnings == [
+            {
+                "type": "warning",
+                "message": "CoreML was unavailable; using CPU.",
+            }
+        ]
+        workspace.close()
+
     def test_a_reply_about_another_run_fails(self, tmp_path: Path) -> None:
         from tree_counter.qgis_adapter.task import RunFailed
 

@@ -25,6 +25,7 @@ PACKAGE_NAME = "tree_counter"
 # same change that adds a distributable package file.
 PACKAGE_MANIFEST = (
     "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "__init__.py",
     "compat.py",
     "constants.py",
@@ -45,12 +46,15 @@ PACKAGE_MANIFEST = (
     "qgis_adapter/__init__.py",
     "qgis_adapter/georeference.py",
     "qgis_adapter/launcher.py",
+    "qgis_adapter/layers.py",
     "qgis_adapter/output.py",
     "qgis_adapter/process.py",
     "qgis_adapter/raster.py",
     "qgis_adapter/runtime_process.py",
     "qgis_adapter/scope.py",
     "qgis_adapter/task.py",
+    "qgis_adapter/task_events.py",
+    "qgis_adapter/task_manager.py",
     "qgis_adapter/workspace.py",
     "runtime/__init__.py",
     "runtime/catalog.json",
@@ -100,10 +104,17 @@ EXPECTED_METADATA = {
         "YOLO models."
     ),
     "about": (
-        "Open-source QGIS plugin foundation for local tree counting in "
-        "georeferenced aerial imagery. Under active development; contains "
-        "no inference runtime; contains no external ML dependencies; "
-        "not ready for production use."
+        "Counts trees in georeferenced aerial imagery using detection "
+        "models you supply. Processing is local: imagery and models never "
+        "leave your machine, and the plugin sends no telemetry. Accepts "
+        "Ultralytics YOLO11 detection models as .onnx exports or .pt "
+        "checkpoints; loading a .pt checkpoint executes code from that "
+        "file, so each one must be confirmed by its hash before it is "
+        "used. No inference runtime is bundled: ONNX Runtime, PyTorch and "
+        "Ultralytics are installed on demand into a per-user directory "
+        "from the Runtime Manager, which is the only part of the plugin "
+        "that uses the network. Results are written as GeoPackage layers "
+        "with run provenance. Experimental and under active development."
     ),
     "version": "0.1.0",
     "author": "Dhany Yudi Prasetyo",
@@ -121,6 +132,33 @@ EXPECTED_METADATA = {
     "hasprocessingprovider": "no",
     "server": "False",
 }
+# What a user must be told before installing, stated in the About text the
+# QGIS plugin manager shows. Each entry is checked literally, so softening
+# the wording fails the gate rather than passing quietly.
+REQUIRED_ABOUT_DISCLOSURES = (
+    ("under active development", "that this build is experimental"),
+    (
+        "no inference runtime is bundled",
+        "that no inference runtime ships with the plugin",
+    ),
+    (
+        "installed on demand",
+        "that the ML dependencies are installed separately",
+    ),
+    (
+        "must be confirmed by its hash",
+        "that a .pt checkpoint executes code and needs confirmation",
+    ),
+    (
+        "never leave your machine",
+        "that imagery and models are processed locally",
+    ),
+    (
+        "only part of the plugin that uses the network",
+        "which feature can reach the network",
+    ),
+    ("sends no telemetry", "that no telemetry is collected"),
+)
 FORBIDDEN_EXTENSIONS = {
     ".pt",
     ".pth",
@@ -203,25 +241,11 @@ def _metadata_errors(values: configparser.SectionProxy) -> list[str]:
         actual = values.get(key, "").strip()
         if actual != expected:
             errors.append(
-                f"metadata {key} must equal the locked foundation value"
+                f"metadata {key} must equal the locked release value"
             )
-    if "active development" not in about:
-        errors.append("metadata about must disclose active development status")
-    if "no inference runtime" not in about:
-        errors.append(
-            "metadata about must disclose that this build has no inference "
-            "runtime"
-        )
-    if "no external ml dependencies" not in about:
-        errors.append(
-            "metadata about must disclose that this build has no external "
-            "ML dependencies"
-        )
-    if "not ready for production use" not in about:
-        errors.append(
-            "metadata about must disclose that this build is not ready for "
-            "production use"
-        )
+    for phrase, message in REQUIRED_ABOUT_DISCLOSURES:
+        if phrase not in about:
+            errors.append(f"metadata about must disclose {message}")
     return errors
 
 
@@ -275,7 +299,7 @@ def _manifest_error(relative: str) -> str | None:
     expected = {name.casefold() for name in PACKAGE_MANIFEST}
     if relative.casefold() not in expected or relative not in PACKAGE_MANIFEST:
         return (
-            "package file is not allowed by the foundation manifest: "
+            "package file is not allowed by the release manifest: "
             f"{PACKAGE_NAME}/{relative}"
         )
     return None
@@ -331,6 +355,7 @@ def validate_source(repo_root: Path) -> list[str]:
         errors.extend(_metadata_errors(values))
 
     notices = root / "THIRD_PARTY_NOTICES.md"
+    package_notices = package / "THIRD_PARTY_NOTICES.md"
     if not notices.is_file():
         errors.append("missing dependency disclosure: THIRD_PARTY_NOTICES.md")
     else:
@@ -344,6 +369,14 @@ def validate_source(repo_root: Path) -> list[str]:
                 errors.append(
                     f"dependency disclosure is missing: {dependency}"
                 )
+        if package_notices.is_file():
+            try:
+                if notices.read_bytes() != package_notices.read_bytes():
+                    errors.append(
+                        "root and packaged THIRD_PARTY_NOTICES.md differ"
+                    )
+            except OSError as exc:
+                errors.append(f"dependency notices cannot be compared: {exc}")
 
     seen_paths: dict[str, str] = {}
     for path in sorted(package.rglob("*")):
@@ -493,7 +526,7 @@ def validate_archive(archive_path: Path) -> list[str]:
                     )
                 if required.casefold() not in canonical_package_names:
                     errors.append(
-                        "archive missing foundation manifest file: "
+                        "archive missing release manifest file: "
                         f"{PACKAGE_NAME}/{required}"
                     )
 

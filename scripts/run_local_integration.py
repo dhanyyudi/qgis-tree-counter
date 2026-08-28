@@ -81,6 +81,31 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(list(argv) if argv is not None else None)
 
 
+def selected_scope(environment: Mapping[str, str] | None = None) -> str:
+    """Return the scope selected for the QGIS child test process."""
+
+    source = os.environ if environment is None else environment
+    value = source.get(TEST_SCOPE_VARIABLE, "bounded").strip().casefold()
+    if value not in SUPPORTED_SCOPES:
+        raise IntegrationConfigurationError(
+            f"{TEST_SCOPE_VARIABLE} must be bounded or full"
+        )
+    return value
+
+
+def selected_backends(
+    environment: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
+    """Return the backends selected for the QGIS child test process."""
+
+    source = os.environ if environment is None else environment
+    value = source.get(TEST_BACKENDS_VARIABLE, "pt,onnx")
+    try:
+        return parse_backends(value)
+    except argparse.ArgumentTypeError as exc:
+        raise IntegrationConfigurationError(str(exc)) from exc
+
+
 def _environment_value(
     name: str, environment: Mapping[str, str]
 ) -> str | None:
@@ -192,15 +217,18 @@ def runtime_ready(backends: Sequence[str]) -> bool:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the three opt-in integration modules with selected controls."""
+    """Run the opt-in integration tests inside a QGIS Python process."""
 
     arguments = parse_args(argv)
+    load_environment(arguments.backends)
     os.environ[TEST_SCOPE_VARIABLE] = str(arguments.scope)
     os.environ[TEST_BACKENDS_VARIABLE] = ",".join(arguments.backends)
 
-    import pytest
+    from scripts.run_qgis_tests import main as run_qgis_tests
 
-    return int(pytest.main([*INTEGRATION_TARGETS, "-q", "-rs"]))
+    return int(
+        run_qgis_tests(["--", *INTEGRATION_TARGETS, "-q", "-rs"])
+    )
 
 
 if __name__ == "__main__":
@@ -226,4 +254,6 @@ __all__ = [
     "parse_backends",
     "runtime_interpreter",
     "runtime_ready",
+    "selected_backends",
+    "selected_scope",
 ]

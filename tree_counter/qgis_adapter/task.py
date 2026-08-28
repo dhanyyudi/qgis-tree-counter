@@ -20,6 +20,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import RLock
 from typing import Any, Protocol, runtime_checkable
 
 from tree_counter.constants import PROTOCOL_VERSION
@@ -215,6 +216,11 @@ class CountingRun:
         started = self._await(run_id, "run_started", result)
         result.backend = str(started.get("backend", ""))
         result.device = str(started.get("device", ""))
+        result.provider = str(started.get("provider", ""))
+        for warning in started.get("warnings", ()):
+            text = str(warning)
+            result.warnings = result.warnings + (text,)
+            self._on_event({"type": "warning", "message": text})
 
     def _process_tile(
         self,
@@ -457,31 +463,23 @@ class CountingTask(QgsTask):
         self._output_request = output_request
         self._crs = crs
         self._cancelled = False
+        self._terminal_committed = False
+        self._cancel_lock = RLock()
         self._should_cancel = (
             should_cancel
             if should_cancel is not None
             else (lambda: self._cancelled)
         )
+        self._channel.set_cancel_check(self._should_cancel)
         self._started_at = ""
 
     def cancel(self) -> bool:
-        """Stop the run, interrupting a blocking worker read.
+        """Request cancellation without touching the worker-thread process."""
 
-        During tile inference the run sits inside a blocking
-        ``WorkerChannel.receive()``. A flag alone is not observed until
-        that read returns - up to the read timeout - so Cancel would look
-        stuck and then surface as a worker failure. Closing the channel
-        makes the read return now; the run sees the cancellation flag and
-        reports a cancellation.
-        """
-
-        self._cancelled = True
-        channel = getattr(self, "_channel", None)
-        if channel is not None:
-            try:
-                channel.close()
-            except (TreeCounterError, OSError):
-                pass
+        with self._cancel_lock:
+            if not self._terminal_committed:
+                self._cancelled = True
+        super().cancel()
         return True
 
     def run(self) -> bool:
@@ -489,6 +487,7 @@ class CountingTask(QgsTask):
 
         self._started_at = self._now()
         keep_log = False
+        published: Path | None = None
         try:
             self._channel.start(self._program, list(self._arguments))
             run = CountingRun(
@@ -499,7 +498,9 @@ class CountingTask(QgsTask):
                 should_cancel=self._should_cancel,
             )
             result = run.execute(self._request)
+            self._guard_cancelled()
             published = self._publish(result)
+            self._guard_cancelled(published)
         except RunCancelled:
             self.terminal_event.emit({"type": "cancelled"})
             return False
@@ -522,13 +523,12 @@ class CountingTask(QgsTask):
         finally:
             self._channel.close()
             self._workspace.close(keep_log=keep_log)
-        self.terminal_event.emit(
-            {
-                "type": "completed",
-                "result": result,
-                "output_path": str(published),
-            }
-        )
+        try:
+            if not self._emit_terminal_result(result, published):
+                return False
+        except TreeCounterError as error:
+            self.terminal_event.emit({"type": "failed", "error": error})
+            return False
         return True
 
     # -- helpers ---------------------------------------------------------
@@ -569,6 +569,48 @@ class CountingTask(QgsTask):
             self._crs,
         )
 
+    def _guard_cancelled(self, published: Path | None = None) -> None:
+        """Remove this run's output and stop when cancellation won."""
+
+        with self._cancel_lock:
+            cancelled = self._cancelled
+        if not cancelled:
+            return
+        if published is not None:
+            self._remove_published(published)
+        raise RunCancelled()
+
+    def _emit_terminal_result(
+        self, result: RunResult, published: Path
+    ) -> bool:
+        """Atomically choose and emit the run's terminal state."""
+
+        with self._cancel_lock:
+            if not self._cancelled:
+                self._terminal_committed = True
+                self.terminal_event.emit(
+                    {
+                        "type": "completed",
+                        "result": result,
+                        "output_path": str(published),
+                    }
+                )
+                return True
+        self._remove_published(published)
+        self.terminal_event.emit({"type": "cancelled"})
+        return False
+
+    @staticmethod
+    def _remove_published(published: Path) -> None:
+        try:
+            published.unlink(missing_ok=True)
+        except OSError as error:
+            raise RunFailed(
+                ErrorCode.OUTPUT_FAILURE,
+                "a cancelled output could not be removed: "
+                f"{type(error).__name__}",
+            ) from error
+
     @staticmethod
     def _now() -> str:
         from datetime import datetime, timezone
@@ -576,10 +618,74 @@ class CountingTask(QgsTask):
         return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+class ModelInspectionTask(QgsTask):
+    """Inspect one model in a task-owned worker process."""
+
+    if pyqtSignal is not None:
+        progress_event = pyqtSignal(dict)
+        warning_event = pyqtSignal(dict)
+        terminal_event = pyqtSignal(dict)
+
+    def __init__(
+        self,
+        description: str,
+        identity: Any,
+        inspect: Callable[[Any, CancelCheck], Mapping[str, Any]],
+    ) -> None:
+        if pyqtSignal is None:
+            raise RuntimeError("ModelInspectionTask requires QGIS")
+        super().__init__(description, QgsTask.Flag.CanCancel)
+        self._identity = identity
+        self._inspect = inspect
+        self._cancelled = False
+
+    def cancel(self) -> bool:
+        """Request cancellation without crossing QProcess thread affinity."""
+
+        self._cancelled = True
+        super().cancel()
+        return True
+
+    def run(self) -> bool:
+        """Run inspection and emit one plain-dictionary terminal event."""
+
+        try:
+            info = self._inspect(
+                self._identity, lambda: self._cancelled
+            )
+        except TreeCounterError as error:
+            if self._cancelled:
+                self.terminal_event.emit({"type": "cancelled"})
+            else:
+                self.terminal_event.emit(
+                    {"type": "failed", "error": error}
+                )
+            return False
+        except Exception as error:
+            if self._cancelled:
+                self.terminal_event.emit({"type": "cancelled"})
+            else:
+                self.terminal_event.emit(
+                    {
+                        "type": "failed",
+                        "error": RunFailed(
+                            ErrorCode.WORKER_PROCESS_FAILURE,
+                            f"{type(error).__name__}: {error}",
+                        ),
+                    }
+                )
+            return False
+        self.terminal_event.emit(
+            {"type": "completed", "info": dict(info)}
+        )
+        return True
+
+
 __all__ = [
     "TILE_ENCODING",
     "CountingRun",
     "CountingTask",
+    "ModelInspectionTask",
     "RunCancelled",
     "RunFailed",
     "RunRequest",

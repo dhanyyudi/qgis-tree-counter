@@ -98,7 +98,7 @@ def test_validate_source_returns_complete_errors_for_multiple_violations(
         "archive.zip",
     ],
 )
-def test_validate_source_rejects_any_file_outside_foundation_manifest(
+def test_validate_source_rejects_any_file_outside_release_manifest(
     tmp_path: Path, relative_path: str
 ) -> None:
     from scripts.check_publication import validate_source
@@ -170,7 +170,7 @@ def test_validate_archive_rejects_forbidden_members(
         "tree_counter/native.dylib",
     ],
 )
-def test_validate_archive_rejects_members_outside_foundation_manifest(
+def test_validate_archive_rejects_members_outside_release_manifest(
     tmp_path: Path, name: str
 ) -> None:
     from scripts.check_publication import validate_archive

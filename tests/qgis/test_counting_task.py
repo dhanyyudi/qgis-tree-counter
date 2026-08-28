@@ -217,6 +217,29 @@ def test_counting_task_subclasses_qgs_task(qgis_application) -> None:
     assert issubclass(CountingTask, QgsTask)
 
 
+def test_model_inspection_task_runs_the_service_off_the_controller(
+    qgis_application,
+) -> None:
+    from tree_counter.qgis_adapter.task import ModelInspectionTask
+
+    identity = object()
+    called: list[tuple[object, bool]] = []
+    events: list[dict] = []
+
+    def inspect(chosen, should_cancel):
+        called.append((chosen, should_cancel()))
+        return {"class_names": ["oil_palm"]}
+
+    task = ModelInspectionTask("Inspect model", identity, inspect)
+    task.terminal_event.connect(events.append)
+
+    assert task.run() is True
+    assert called == [(identity, False)]
+    assert events == [
+        {"type": "completed", "info": {"class_names": ["oil_palm"]}}
+    ]
+
+
 def test_run_executes_a_run_and_returns_true(
     qgis_application, tmp_path: Path
 ) -> None:
@@ -315,8 +338,12 @@ def test_cancelling_interrupts_a_blocking_worker_read(
     """
 
     closed: list[int] = []
+    cancel_checks: list[object] = []
 
     class SpyChannel:
+        def set_cancel_check(self, callback) -> None:
+            cancel_checks.append(callback)
+
         def close(self) -> None:
             closed.append(1)
 
@@ -325,7 +352,8 @@ def test_cancelling_interrupts_a_blocking_worker_read(
     )
 
     assert task.cancel() is True
-    assert closed == [1], "cancel left the blocking read running"
+    assert cancel_checks and cancel_checks[0]() is True
+    assert closed == [], "cancel touched a worker-thread process"
 
 
 def test_an_interrupted_read_is_reported_as_a_cancellation(
@@ -351,3 +379,41 @@ def test_an_interrupted_read_is_reported_as_a_cancellation(
 
     with pytest.raises(RunCancelled):
         run._await("run-1", "model_info", None)
+
+
+def test_cancel_during_publication_removes_output_and_wins_terminal_state(
+    qgis_application, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task, events = _task(
+        qgis_application, tmp_path, ScriptedTransport(_happy_replies())
+    )
+    published = tmp_path / "published.gpkg"
+
+    def publish(_result):
+        published.write_bytes(b"complete but cancelled")
+        task.cancel()
+        return published
+
+    monkeypatch.setattr(task, "_publish", publish)
+
+    assert task.run() is False
+    assert events == [{"type": "cancelled"}]
+    assert not published.exists()
+
+
+def test_completion_event_is_the_atomic_terminal_boundary(
+    qgis_application, tmp_path: Path
+) -> None:
+    task, events = _task(
+        qgis_application, tmp_path, ScriptedTransport(_happy_replies())
+    )
+
+    def cancel_at_delivery(event: dict) -> None:
+        if event["type"] == "completed":
+            task.cancel()
+
+    task.terminal_event.connect(cancel_at_delivery)
+
+    assert task.run() is True
+    assert [event["type"] for event in events] == ["completed"]
+    assert Path(events[0]["output_path"]).is_file()
