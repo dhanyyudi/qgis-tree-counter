@@ -22,6 +22,18 @@ def _probe_report(version: str) -> dict[str, object]:
     }
 
 
+_VALID_SELF_CHECK_OUTPUT = json.dumps(
+    {
+        "python_version": "3.12.11",
+        "versions": {
+            "numpy": "2.3.4",
+            "onnxruntime": "1.29.0",
+        },
+        "accelerators": ["cpu"],
+    }
+)
+
+
 def _plan(components=("onnxruntime",)):
     from tree_counter.runtime.installer import InstallPlan
 
@@ -36,7 +48,13 @@ def _plan(components=("onnxruntime",)):
 class FakeRunner:
     """A deterministic process runner that records every argument vector."""
 
-    def __init__(self, versions=None, failures=(), cancel_after=None) -> None:
+    def __init__(
+        self,
+        versions=None,
+        failures=(),
+        cancel_after=None,
+        self_check_stdout=None,
+    ) -> None:
         from tree_counter.runtime.catalog import load_catalog
 
         self.calls: list[list[str]] = []
@@ -49,6 +67,7 @@ class FakeRunner:
         }
         self._failures = tuple(failures)
         self._cancel_after = cancel_after
+        self._self_check_stdout = self_check_stdout
 
     def __call__(self, argv, timeout):
         from tree_counter.runtime.installer import ProcessResult
@@ -69,15 +88,18 @@ class FakeRunner:
             (target / "bin" / "python").write_text("", encoding="utf-8")
             return ProcessResult(0, "", "")
         if "--self-check" in joined or "import json" in joined:
-            return ProcessResult(
-                0,
-                json.dumps(
+            output = self._self_check_stdout
+            if output is None:
+                output = json.dumps(
                     {
                         "python_version": "3.12.11",
                         "versions": self._versions,
                         "accelerators": ["cpu", "coreml"],
                     }
-                ),
+                )
+            return ProcessResult(
+                0,
+                output,
                 "",
             )
         return ProcessResult(0, "installed", "")
@@ -123,6 +145,50 @@ def test_install_creates_a_venv_and_activates_it(tmp_path: Path) -> None:
     assert (tmp_path / "runtime" / "active").is_dir()
     manifest_path = tmp_path / "runtime" / "active"
     assert (manifest_path / "runtime_manifest.json").is_file()
+
+
+def test_install_accepts_dependency_chatter_before_marked_self_check(
+    tmp_path: Path,
+) -> None:
+    stdout = "dependency warning\nTREE_COUNTER_SELF_CHECK:" + (
+        _VALID_SELF_CHECK_OUTPUT
+    )
+    installer = _installer(tmp_path, FakeRunner(self_check_stdout=stdout))
+
+    manifest = installer.install(_plan())
+
+    assert manifest.platform == "macos-arm64"
+    assert (
+        tmp_path / "runtime" / "active" / "runtime_manifest.json"
+    ).is_file()
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    [
+        "dependency warning\n" + _VALID_SELF_CHECK_OUTPUT,
+        (
+            "TREE_COUNTER_SELF_CHECK:"
+            + _VALID_SELF_CHECK_OUTPUT
+            + "\nTREE_COUNTER_SELF_CHECK:"
+            + _VALID_SELF_CHECK_OUTPUT
+        ),
+        "TREE_COUNTER_SELF_CHECK:not-json",
+        "TREE_COUNTER_SELF_CHECK:[]",
+    ],
+    ids=["missing-marker", "duplicate-marker", "malformed", "non-dict"],
+)
+def test_self_check_rejects_ambiguous_or_invalid_marked_output(
+    tmp_path: Path, stdout: str
+) -> None:
+    from tree_counter.runtime.installer import InstallError
+
+    installer = _installer(
+        tmp_path, FakeRunner(self_check_stdout=stdout)
+    )
+
+    with pytest.raises(InstallError):
+        installer.install(_plan())
 
 
 def test_every_command_is_an_argument_vector(tmp_path: Path) -> None:
